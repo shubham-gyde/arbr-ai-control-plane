@@ -15,6 +15,11 @@ const { PROVIDERS } = require("../config");
 // streaming) instead of round-tripping through LangChain, which drops everything but text.
 const OPENAI_COMPAT_PROVIDERS = new Set(["openai", "deepseek", "moonshot", "xai", "groq"]);
 
+// Native providers whose LangChain adapter supports tools via .bindTools() (e.g.
+// ChatBedrockConverse). These are excluded from the 501 gate for tools so that tool
+// calls flow through the LangChain invocation path instead of being rejected.
+const NATIVE_TOOL_PROVIDERS = new Set(["bedrock-nova"]);
+
 // Resolved chat-completions base URL for an OpenAI-compatible provider, or null if the provider
 // is native (anthropic/gemini/bedrock) and must use the LangChain path.
 function openAICompatBaseURL(providerId) {
@@ -44,15 +49,61 @@ function chunkText(chunk) {
   return "";
 }
 
-// Convert { role, content } messages to LangChain BaseMessages.
+// Convert OpenAI-format messages to LangChain BaseMessages.
+// Handles all roles including "tool" (multi-turn tool results) and "assistant"
+// with tool_calls (prior assistant turns in a multi-turn tool flow).
 function toLcMessages(messages) {
-  const { SystemMessage, HumanMessage, AIMessage } = require("@langchain/core/messages");
+  const { SystemMessage, HumanMessage, AIMessage, ToolMessage } = require("@langchain/core/messages");
   return messages.map((m) => {
     const role = (m.role || "user").toLowerCase();
     if (role === "system") return new SystemMessage(m.content || "");
-    if (role === "assistant" || role === "ai") return new AIMessage(m.content || "");
+    if (role === "tool") {
+      return new ToolMessage({
+        content: typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""),
+        tool_call_id: m.tool_call_id || "",
+      });
+    }
+    if (role === "assistant" || role === "ai") {
+      if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+        return new AIMessage({
+          content: m.content || "",
+          tool_calls: m.tool_calls.map((tc) => ({
+            name: tc.function?.name || "",
+            args: (() => { try { return JSON.parse(tc.function?.arguments || "{}"); } catch { return {}; } })(),
+            id: tc.id || "",
+            type: "tool_call",
+          })),
+        });
+      }
+      return new AIMessage(m.content || "");
+    }
     return new HumanMessage(m.content || "");
   });
+}
+
+// Bind OpenAI-format tool definitions to a LangChain model. Passes through tool_choice
+// when explicitly set (omits "auto"/"none" since some providers reject those values).
+function buildBoundModel(model, body) {
+  const tools = body.tools;
+  if (!tools?.length) return model;
+  const opts = {};
+  if (body.tool_choice && body.tool_choice !== "auto" && body.tool_choice !== "none") {
+    opts.tool_choice = body.tool_choice;
+  }
+  return model.bindTools(tools, opts);
+}
+
+// Convert LangChain AIMessage.tool_calls to OpenAI tool_calls array format.
+function translateToolCalls(toolCalls) {
+  if (!toolCalls?.length) return undefined;
+  return toolCalls.map((tc, i) => ({
+    id: tc.id || `call_${i}`,
+    type: "function",
+    function: {
+      name: tc.name,
+      arguments: typeof tc.args === "string" ? tc.args : JSON.stringify(tc.args ?? {}),
+    },
+  }));
 }
 
 // Transparent reverse-proxy to an OpenAI-compatible upstream (e.g. LiteLLM). Forwards the raw
@@ -224,14 +275,16 @@ async function handleOpenAICompat(req, res) {
   const compatBaseURL = openAICompatBaseURL(served.provider);
 
   // Detect tools / vision before falling through to the LangChain path, which strips both.
-  // Surface a clear 501 instead of silently degrading the response.
+  // NATIVE_TOOL_PROVIDERS handle tools via .bindTools() — only block vision for them.
+  // All other native providers get a 501 for both tools and vision.
   if (!compatBaseURL) {
     const hasTools = Array.isArray(body.tools) && body.tools.length > 0;
     const hasVision = body.messages.some(
       (m) => Array.isArray(m.content) && m.content.some((c) => c.type === "image_url")
     );
-    if (hasTools || hasVision) {
-      const features = [hasTools && "tools", hasVision && "vision"].filter(Boolean).join(" and ");
+    const toolsUnsupported = hasTools && !NATIVE_TOOL_PROVIDERS.has(served.provider);
+    if (toolsUnsupported || hasVision) {
+      const features = [toolsUnsupported && "tools", hasVision && "vision"].filter(Boolean).join(" and ");
       return res.status(501).json({
         error: {
           message:
@@ -250,6 +303,71 @@ async function handleOpenAICompat(req, res) {
       res, body, served, modelRequested, meta, requestId, timestamp,
       taskType, classifiedBy, routingDecision, eff, baseURL: compatBaseURL,
     });
+  }
+
+  // Native tool invocation: NATIVE_TOOL_PROVIDERS (e.g. bedrock-nova) support tools via
+  // LangChain's .bindTools(). Bypass the generic invoke path (which has no tool support)
+  // and call the model directly. Always returns non-streaming — the tool_calls turn is
+  // typically a single decision; the client sends the tool result back in a follow-up call.
+  if (NATIVE_TOOL_PROVIDERS.has(served.provider) && Array.isArray(body.tools) && body.tools.length > 0) {
+    const start = Date.now();
+    try {
+      const model = router.getModel({
+        providerOverride: served.provider,
+        modelOverride: served.model,
+        temperature: body.temperature,
+        maxTokens: body.max_tokens,
+      });
+      const boundModel = buildBoundModel(model, body);
+      const lcMessages = toLcMessages(body.messages);
+      const aiMsg = await boundModel.invoke(lcMessages);
+      const toolCalls = translateToolCalls(aiMsg.tool_calls);
+      const finishReason = toolCalls?.length ? "tool_calls" : "stop";
+      const um = aiMsg.usage_metadata || {};
+      const promptTokens = um.input_tokens || 0;
+      const completionTokens = um.output_tokens || 0;
+      const totalTokens = um.total_tokens || (promptTokens + completionTokens);
+
+      res.json({
+        id: `chatcmpl-${requestId}`,
+        object: "chat.completion",
+        model: served.model,
+        choices: [{
+          index: 0,
+          message: {
+            role: "assistant",
+            content: toolCalls?.length ? null : chunkText(aiMsg),
+            tool_calls: toolCalls,
+          },
+          finish_reason: finishReason,
+        }],
+        usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: totalTokens },
+      });
+
+      setImmediate(() =>
+        logger.write({
+          requestId, timestamp, ...meta,
+          provider: served.provider, model: served.model, modelRequested,
+          taskType, classifiedBy,
+          promptTokens, completionTokens, totalTokens,
+          latencyMs: Date.now() - start, status: "success", routingDecision, cacheHit: false,
+          knownPricing: served.knownPricing,
+        })
+      );
+    } catch (err) {
+      setImmediate(() =>
+        logger.write({
+          requestId, timestamp, ...meta,
+          provider: served.provider, model: served.model, modelRequested,
+          taskType, classifiedBy, latencyMs: Date.now() - start,
+          status: "failure", routingDecision, cacheHit: false,
+        })
+      );
+      return res.status(502).json({
+        error: { message: String(err.message || err), type: "server_error", code: "provider_error" },
+      });
+    }
+    return;
   }
 
   if (body.stream) {
