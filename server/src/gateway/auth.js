@@ -70,7 +70,9 @@ async function setRequireApiKey(on) {
 async function middleware(req, res, next) {
   try {
     const header = req.headers.authorization || "";
-    const raw = header.startsWith("Bearer ") ? header.slice(7).trim() : null;
+    const raw = header.startsWith("Bearer ")
+      ? header.slice(7).trim()
+      : (req.headers["x-api-key"] || "").trim() || null;
 
     if (raw) {
       const keys = await _keysByHash();
@@ -92,7 +94,7 @@ async function middleware(req, res, next) {
     if (await requireApiKeyOn()) {
       return res.status(401).json({
         error: "invalid_api_key",
-        message: "An API key is required (Authorization: Bearer ka_…). Create one in Settings → API keys.",
+        message: "An API key is required (Authorization: Bearer ab_… or x-api-key: ab_…). Create one in Settings → API keys.",
       });
     }
     return next();
