@@ -33,12 +33,12 @@ function Wordmark() {
 export default function Layout({ status, onSignOut, children }) {
   return (
     <div className="flex min-h-full">
-      <aside className="flex w-64 flex-col border-r border-gray-200 bg-white">
+      <aside className="sticky top-0 flex h-screen w-64 flex-col border-r border-gray-200 bg-white">
         <div className="px-6 py-6">
           <Wordmark />
           <div className="mt-1 text-xs text-gray-500">Control Plane · Phase 1</div>
         </div>
-        <nav className="flex flex-1 flex-col px-3">
+        <nav className="min-h-0 flex-1 overflow-y-auto px-3">
           {NAV_GROUPS.map((group) => (
             <div key={group.section} className="mb-4">
               <div className="px-3 pb-1 label">{group.section}</div>
@@ -49,11 +49,11 @@ export default function Layout({ status, onSignOut, children }) {
               ))}
             </div>
           ))}
-          <div className="mt-auto border-t border-gray-100 pt-3">
-            <NavLink to={FOOTER_LINK.to} className={navClass}>{FOOTER_LINK.label}</NavLink>
-          </div>
         </nav>
-        <div className="border-t border-gray-200 px-6 py-4 text-xs text-gray-400">
+        <div className="border-t border-gray-200 px-3 pt-3 pb-1">
+          <NavLink to={FOOTER_LINK.to} className={navClass}>{FOOTER_LINK.label}</NavLink>
+        </div>
+        <div className="px-6 py-4 text-xs text-gray-400">
           A human approves the policy; rules always override.
           {getAdminToken() && onSignOut && (
             <button onClick={onSignOut} className="mt-2 block text-xs text-gray-500 underline hover:text-gyde-charcoal">
