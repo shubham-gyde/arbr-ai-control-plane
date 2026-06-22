@@ -67,6 +67,17 @@ router.get("/status", async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
+router.get("/about", (_req, res) => {
+  const pkg = require("../../package.json");
+  res.json({
+    version: pkg.version,
+    name: pkg.name,
+    sdkJs: "0.2.0",
+    sdkPython: "0.2.0",
+    nodeVersion: process.version,
+  });
+});
+
 // ── cost caps (budgets) ──
 router.get("/caps", async (_req, res, next) => {
   try {

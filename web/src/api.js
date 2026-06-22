@@ -38,6 +38,7 @@ function qs(params = {}) {
 
 export const api = {
   status: () => req("/status"),
+  about: () => req("/about"),
 
   // Gateway discovery endpoints (same auth as /v1/chat — usable by SDK clients).
   gatewayModels: () => fetch("/v1/models", { headers: { "Content-Type": "application/json" } }).then((r) => r.json()),
