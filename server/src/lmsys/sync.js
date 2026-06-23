@@ -14,18 +14,36 @@ const ModelEntry                 = require("../models/ModelEntry");
 const Settings                   = require("../models/Settings");
 const { normalize, prefixMatch } = require("../livebench/normalize");
 
-const HF_API_URL =
+const HF_BASE =
   "https://datasets-server.huggingface.co/rows" +
-  "?dataset=lmarena-ai%2Fleaderboard-dataset&config=text&split=latest&offset=0&length=500";
+  "?dataset=lmarena-ai%2Fleaderboard-dataset&config=text&split=latest&length=100";
 
 async function fetchLeaderboard() {
-  const res = await fetch(HF_API_URL, {
-    headers: { "User-Agent": "arbr-control-plane" },
-  });
-  if (!res.ok) throw new Error(`LMSYS HuggingFace API returned ${res.status}`);
-  const json = await res.json();
-  // rows is an array of { row_idx, row: { model, rating, organization, ... } }
-  return (json.rows || []).map((r) => r.row || r);
+  const all = [];
+  let offset = 0;
+  let latestDate = null;
+
+  for (;;) {
+    const res = await fetch(`${HF_BASE}&offset=${offset}`, {
+      headers: { "User-Agent": "arbr-control-plane" },
+    });
+    if (!res.ok) throw new Error(`LMSYS HuggingFace API returned ${res.status}`);
+    const json = await res.json();
+    if (json.error) throw new Error(`LMSYS HuggingFace API error: ${json.error}`);
+    const rows = (json.rows || []).map((r) => r.row || r);
+    if (rows.length === 0) break;
+
+    // Dataset is sorted newest-first. Capture the latest date from the first page,
+    // then stop as soon as rows from an older date appear.
+    if (!latestDate) latestDate = rows[0].leaderboard_publish_date;
+    const pageRows = rows.filter((r) => r.leaderboard_publish_date === latestDate);
+    all.push(...pageRows);
+
+    if (pageRows.length < rows.length) break; // crossed into older dates
+    offset += rows.length;
+  }
+
+  return all;
 }
 
 async function run() {

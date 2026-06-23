@@ -844,10 +844,17 @@ export default function Models() {
     try {
       const result = await api.syncBenchmarks();
       setBenchStatus({ lastSyncedAt: new Date().toISOString() });
-      const lb = result.livebench?.matched ?? 0;
-      const ls = result.lmsys?.matched     ?? 0;
-      const lt = result.litellm?.matched   ?? 0;
-      setSyncMsg(`Updated: ${lt} pricing · ${lb} benchmark scores · ${ls} LMSYS scores`);
+      const lb    = result.livebench?.matched ?? 0;
+      const ls    = result.lmsys?.matched    ?? 0;
+      const lt    = result.litellm?.matched  ?? 0;
+      const added = result.litellm?.added    ?? 0;
+      const parts = [
+        `${lt} models refreshed`,
+        added > 0 && `${added} new models added`,
+        `${lb} benchmark scores`,
+        ls > 0 && `${ls} LMSYS scores`,
+      ].filter(Boolean);
+      setSyncMsg(parts.join(" · "));
       await load();
       setTimeout(() => setSyncMsg(null), 7000);
     } catch (e) {
