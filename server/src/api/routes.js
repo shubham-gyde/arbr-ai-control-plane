@@ -347,13 +347,8 @@ router.post("/custom-providers/:id/test", async (req, res) => {
 
 // ── model registry ──
 router.get("/models", (_req, res) => {
-  res.json(pricing.listModels().map((m) => ({
-    id: m.id, provider: m.provider, tier: m.tier, label: m.label || "",
-    inputPer1M: m.inputPer1M, outputPer1M: m.outputPer1M,
-    builtIn: m.builtIn, enabled: m.enabled,
-    bestUsedFor: m.bestUsedFor || "", releaseDate: m.releaseDate || "",
-    contextWindow: m.contextWindow || null,
-  })));
+  // eslint-disable-next-line no-unused-vars
+  res.json(pricing.listModels().map(({ _id, __v, ...m }) => m));
 });
 
 // Live test — send a user message to a specific model and return the response.
