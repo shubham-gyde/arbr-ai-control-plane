@@ -36,6 +36,57 @@ const BTN_PRIMARY = `${BTN} bg-gyde-green-600 text-white hover:bg-gyde-green-700
 const BTN_GHOST   = `${BTN} border border-gray-300 text-gray-700 hover:bg-gray-50`;
 const BTN_DANGER  = `${BTN} text-red-600 hover:bg-red-50`;
 
+// ── ModelBenchmarkPanel ───────────────────────────────────────────────────────
+
+const BENCH_DIMS = ["coding", "reasoning", "writing", "analysis", "language", "general", "data"];
+
+function BenchmarkBar({ dim, value }) {
+  const pct = value != null ? Math.round(value * 100) : null;
+  return (
+    <div className="flex items-center gap-3 text-xs">
+      <span className="w-16 text-right text-gray-500 capitalize flex-shrink-0">{dim}</span>
+      <div className="flex-1 h-1.5 rounded-full bg-gray-200 overflow-hidden">
+        {pct != null && (
+          <div className="h-1.5 rounded-full bg-gyde-green-600 transition-all" style={{ width: `${pct}%` }} />
+        )}
+      </div>
+      <span className="w-8 font-mono text-gray-600 flex-shrink-0">{pct != null ? pct : "—"}</span>
+    </div>
+  );
+}
+
+function ModelBenchmarkPanel({ model }) {
+  const caps   = model.capabilities || {};
+  const hasCaps = BENCH_DIMS.some((d) => caps[d] != null);
+
+  if (!hasCaps) {
+    return (
+      <div className="border-t border-gray-100 bg-gray-50 px-4 py-4 text-sm text-gray-400 text-center">
+        No benchmark data — click "Sync from LiveBench" at the top of this page
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t border-gray-100 bg-gray-50 px-4 py-3 space-y-2">
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">LiveBench scores</span>
+        {model.livebenchModelName && (
+          <span className="text-xs text-gray-400 font-mono truncate max-w-[240px]" title={model.livebenchModelName}>
+            {model.livebenchModelName}
+          </span>
+        )}
+      </div>
+      {BENCH_DIMS.map((d) => (
+        <BenchmarkBar key={d} dim={d} value={caps[d]} />
+      ))}
+      {model.livebenchSyncedAt && (
+        <p className="text-xs text-gray-400 pt-1">Synced {new Date(model.livebenchSyncedAt).toLocaleString()}</p>
+      )}
+    </div>
+  );
+}
+
 // ── ModelMetaPanel ────────────────────────────────────────────────────────────
 
 function ModelMetaPanel({ model }) {
@@ -192,6 +243,12 @@ function ModelRow({ model, onRefresh }) {
         {/* actions */}
         <div className="flex items-center gap-1 flex-shrink-0">
           <button
+            onClick={() => togglePanel("scores")}
+            className={`${BTN} text-xs ${expanded === "scores" ? "bg-gyde-green-50 text-gyde-green-700 border border-gyde-green-200" : "text-gray-600 hover:bg-gray-100"}`}
+          >
+            Scores
+          </button>
+          <button
             onClick={() => togglePanel("test")}
             className={`${BTN} text-xs ${expanded === "test" ? "bg-gyde-green-50 text-gyde-green-700 border border-gyde-green-200" : "text-gray-600 hover:bg-gray-100"}`}
           >
@@ -249,8 +306,9 @@ function ModelRow({ model, onRefresh }) {
       )}
 
       {/* expandable panels */}
-      {expanded === "meta" && !editing && <ModelMetaPanel model={model} />}
-      {expanded === "test" && <ModelTestPanel modelId={model.id} />}
+      {expanded === "meta"    && !editing && <ModelMetaPanel model={model} />}
+      {expanded === "scores"  && !editing && <ModelBenchmarkPanel model={model} />}
+      {expanded === "test"    && <ModelTestPanel modelId={model.id} />}
     </div>
   );
 }
@@ -739,6 +797,9 @@ export default function Models() {
   const [models, setModels]         = useState([]);
   const [selected, setSelected]     = useState(null);
   const [loading, setLoading]       = useState(true);
+  const [lbStatus, setLbStatus]     = useState(null);
+  const [syncing, setSyncing]       = useState(false);
+  const [syncMsg, setSyncMsg]       = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -754,7 +815,25 @@ export default function Models() {
     } catch { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadLbStatus = useCallback(() => {
+    api.livebenchStatus().then(setLbStatus).catch(() => {});
+  }, []);
+
+  const syncLivebench = async () => {
+    setSyncing(true); setSyncMsg("Syncing from LiveBench…");
+    try {
+      const result = await api.syncLivebench();
+      setLbStatus({ syncedAt: new Date().toISOString(), version: result.version });
+      setSyncMsg(`${result.matched} of ${result.total} models updated · v${result.version?.replace(/_/g, "-")}`);
+      await load();
+      setTimeout(() => setSyncMsg(null), 6000);
+    } catch (e) {
+      setSyncMsg(`Sync failed: ${e.message}`);
+      setTimeout(() => setSyncMsg(null), 5000);
+    } finally { setSyncing(false); }
+  };
+
+  useEffect(() => { load(); loadLbStatus(); }, [load, loadLbStatus]);
 
   // Auto-select first provider once loaded
   const didAutoSelect = useRef(false);
@@ -773,11 +852,26 @@ export default function Models() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-semibold text-gyde-charcoal">Models</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Manage provider connections and the model registry.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold text-gyde-charcoal">Models</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Manage provider connections and the model registry.
+          </p>
+        </div>
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          <button className={BTN_GHOST} disabled={syncing} onClick={syncLivebench}>
+            {syncing ? "Syncing…" : "Sync from LiveBench"}
+          </button>
+          {syncMsg
+            ? <span className="text-xs text-gray-500">{syncMsg}</span>
+            : lbStatus?.syncedAt
+              ? <span className="text-xs text-gray-400">
+                  LiveBench: {new Date(lbStatus.syncedAt).toLocaleDateString()}{lbStatus.version ? ` · v${lbStatus.version.replace(/_/g, "-")}` : ""}
+                </span>
+              : <span className="text-xs text-gray-400">LiveBench: not synced</span>
+          }
+        </div>
       </div>
 
       <div className="flex min-h-[600px] rounded-xl border border-gray-200 bg-white overflow-hidden">
