@@ -39,12 +39,15 @@ const GITHUB_COMMITS_URL =
 
 const PROVIDER_IMPORT = {
   openai: {
-    match: (k) => !k.includes("/") && /^(gpt-|o\d|chatgpt-)/.test(k),
+    // Keep: gpt-4o family, o-series (o1/o3/o4), chatgpt-4o, gpt-5 family
+    // Drop: gpt-4-* dated snapshots, gpt-4-32k*, gpt-3.5-* (all deprecated)
+    match: (k) => !k.includes("/") && /^(gpt-4o|o[1-9]|chatgpt-4o|gpt-5)/.test(k),
     id:    (k) => k,
     provider: "openai",
   },
   anthropic: {
-    match: (k) => !k.includes("/") && k.startsWith("claude-"),
+    // Drop: claude-2*, claude-instant* (deprecated generations)
+    match: (k) => !k.includes("/") && k.startsWith("claude-") && !/^claude-(2|instant)/.test(k),
     id:    (k) => k,
     provider: "anthropic",
   },
@@ -169,6 +172,11 @@ async function run() {
       const modelId = rule.id(ltKey);
       if (existingIds.has(modelId)) continue;
 
+      // Skip LiteLLM-deprecated entries
+      if (ltEntry.deprecated === true) continue;
+      // Skip dated snapshots: IDs ending in -YYYY-MM-DD, -YYYYMMDD, or -YYYY-MM
+      if (/-\d{4}-\d{2}-\d{2}$|-\d{8}$|-20\d{2}-\d{2}$/.test(modelId)) continue;
+
       const inputCost  = parseFloat(ltEntry.input_cost_per_token);
       const outputCost = parseFloat(ltEntry.output_cost_per_token);
       const inputPer1M  = isFinite(inputCost)  && inputCost  > 0 ? +(inputCost  * 1_000_000).toFixed(4) : 0;
@@ -208,7 +216,10 @@ async function run() {
     for (const [ltKey, ltEntry] of Object.entries(data)) {
       if (ltEntry.mode !== "chat") continue;
       if (!rule.match(ltKey)) continue;
-      validIds.add(rule.id(ltKey));
+      if (ltEntry.deprecated === true) continue;
+      const id = rule.id(ltKey);
+      if (/-\d{4}-\d{2}-\d{2}$|-\d{8}$|-20\d{2}-\d{2}$/.test(id)) continue;
+      validIds.add(id);
     }
     validByProvider[arbrProvider] = validIds;
   }

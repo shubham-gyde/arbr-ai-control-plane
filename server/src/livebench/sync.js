@@ -71,36 +71,39 @@ async function fetchCsv(date) {
 
 // normalize() and prefixMatch() imported from ./normalize.js
 
-// Map a LiveBench row's category averages to Arbr's 7 capability dimensions.
-// All values normalized to 0–1; null fields are treated as 0 in calculations.
+// Map a LiveBench row's individual task scores to Arbr's 7 capability dimensions.
+// LiveBench uses raw task columns (not aggregated averages); missing columns return 0.
+// All task scores are 0-100 scale; divided by 100 to get 0-1.
 function toCapabilities(row) {
-  const n = (col) => {
-    const v = parseFloat(row[col]);
-    return isFinite(v) ? v : 0;
+  const n = (col) => { const v = parseFloat(row[col]); return isFinite(v) ? v : 0; };
+  const avg = (...cols) => {
+    const vals = cols.map((c) => n(c)).filter((v) => v > 0);
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
   };
 
-  const coding    = n("average_coding");
-  const agCoding  = n("average_agentic_coding");
-  const reasoning = n("average_reasoning");
-  const math      = n("average_math");
-  const dataAnal  = n("average_data_analysis");
-  const language  = n("average_language");
-  const instFollow= n("average_instruction_following");
+  const codingRaw    = avg("code_completion", "code_generation", "python", "javascript", "typescript");
+  const logicRaw     = avg("connections", "consecutive_events", "logic_with_navigation", "spatial", "theory_of_mind", "zebra_puzzle");
+  const mathRaw      = avg("AMPS_Hard", "integrals_with_game", "math_comp", "olympiad", "simplify");
+  const writingRaw   = avg("story_generation", "summarize", "plot_unscrambling");
+  const languageRaw  = avg("paraphrase", "typos");
+  const dataRaw      = avg("tablejoin", "tablereformat");
 
-  // Compute general as mean of the six primary categories.
-  const categories = [coding, agCoding, reasoning, math, dataAnal, language, instFollow];
-  const validCats  = categories.filter((v) => v > 0);
-  const generalRaw = validCats.length ? validCats.reduce((a, b) => a + b, 0) / validCats.length : 0;
+  // General = average of all numeric task columns present in this row.
+  const allTasks = Object.entries(row)
+    .filter(([k]) => k !== "model")
+    .map(([, v]) => parseFloat(v))
+    .filter((v) => isFinite(v) && v > 0);
+  const generalRaw = allTasks.length ? allTasks.reduce((a, b) => a + b, 0) / allTasks.length : 0;
 
   const clamp = (v) => Math.min(1, Math.max(0, v));
   return {
-    coding:    clamp((coding + agCoding) / 2 / 100),
-    reasoning: clamp((0.7 * reasoning + 0.3 * math) / 100),
-    writing:   clamp(instFollow / 100),
-    analysis:  clamp((dataAnal + reasoning) / 2 / 100),
-    language:  clamp(language / 100),
-    general:   clamp(generalRaw / 100),
-    data:      clamp(dataAnal / 100),
+    coding:    clamp(codingRaw   / 100),
+    reasoning: clamp((0.7 * logicRaw + 0.3 * mathRaw) / 100),
+    writing:   clamp(writingRaw  / 100),
+    analysis:  clamp((dataRaw + logicRaw) / 2 / 100),
+    language:  clamp(languageRaw / 100),
+    general:   clamp(generalRaw  / 100),
+    data:      clamp(dataRaw     / 100),
   };
 }
 

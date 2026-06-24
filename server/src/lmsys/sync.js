@@ -1,14 +1,14 @@
 // Fetches Elo ratings from the LMSYS Chatbot Arena leaderboard (via HuggingFace
-// datasets server API) and writes a `general` capability score (0–1) for models
-// that were NOT already covered by the LiveBench sync.
+// datasets server API) and writes a `general` capability score (0–1) for all models.
 //
 // Elo → 0-1: general = clamp((elo - 1000) / 500, 0, 1)
 //   Elo 1000 → 0.0  (weak baseline)
 //   Elo 1250 → 0.5  (mid-range)
 //   Elo 1500 → 1.0  (top tier)
 //
-// Only writes capabilities.general — never overwrites other dimensions or
-// models that already have livebenchSyncedAt set.
+// Writes capabilities.general for any model that appears in the leaderboard,
+// including models already covered by LiveBench (supplements the general dimension
+// with human-preference Elo ratings).
 
 const ModelEntry                 = require("../models/ModelEntry");
 const Settings                   = require("../models/Settings");
@@ -62,8 +62,9 @@ async function run() {
     }
   }
 
-  // Only update models that LiveBench hasn't covered yet
-  const models = await ModelEntry.find({ livebenchSyncedAt: null }).lean();
+  // Process all models — LMSYS covers frontier models regardless of LiveBench status.
+  // Elo-based general score supplements LiveBench's task-performance general score.
+  const models = await ModelEntry.find({}).lean();
   const now    = new Date();
   let matched  = 0;
   const skipped = [];
@@ -103,7 +104,7 @@ async function run() {
     { upsert: true }
   );
 
-  console.log(`[lmsys] synced ${matched}/${models.length} models (LiveBench-covered models skipped)`);
+  console.log(`[lmsys] synced ${matched}/${models.length} models`);
   return { matched, total: models.length, version, skipped };
 }
 
