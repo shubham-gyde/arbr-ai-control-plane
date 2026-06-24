@@ -73,6 +73,8 @@ export interface ArbrModel {
   inputPer1M: number;
   /** USD per 1M output tokens. */
   outputPer1M: number;
+  /** Whether this model supports tool/function calling on /v1/chat/completions. */
+  toolCallSupported: boolean;
 }
 
 export interface ModelsResponse {

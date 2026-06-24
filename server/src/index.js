@@ -39,25 +39,43 @@ async function start() {
   // OpenAI-compatible endpoint — any client that speaks the OpenAI spec can use Arbr.
   app.post("/v1/chat/completions", auth.middleware, handleOpenAICompat);
 
-  // OpenAI-compatible model discovery — lets any SDK (or curl) enumerate what's
-  // available on this Arbr instance without hitting the admin API.
-  app.get("/v1/models", auth.middleware, (_req, res) => {
-    const models = registry.listModels();
-    res.json({
-      object: "list",
-      data: models.map((m) => ({
-        id: m.id,
-        object: "model",
-        created: m.createdAt ? Math.floor(new Date(m.createdAt).getTime() / 1000) : 0,
-        owned_by: m.provider,
-        // Arbr extensions
-        provider: m.provider,
-        label: m.label || m.id,
-        tier: m.tier,
-        inputPer1M: m.inputPer1M,
-        outputPer1M: m.outputPer1M,
-      })),
-    });
+  // OpenAI-compatible model discovery — returns only models whose provider is
+  // currently connected (live), with a toolCallSupported flag so clients know
+  // whether to enable the Search / function-calling UI for each model.
+  //
+  // Tool call support rules (mirrors openaiCompat.js):
+  //   • OpenAI-compat providers (openai/deepseek/moonshot/xai/groq/litellm): yes — raw proxy
+  //   • bedrock-nova + Amazon Nova model IDs: yes — via ChatBedrockConverse.bindTools()
+  //   • Everything else (gemini/anthropic/non-Nova bedrock): no — returns 501 today
+  app.get("/v1/models", auth.middleware, async (_req, res) => {
+    try {
+      const eff = await connections.effective();
+      const liveSet = new Set(eff.liveIds);
+      const COMPAT_PROVIDERS = new Set(["openai", "deepseek", "moonshot", "xai", "groq", "litellm"]);
+      const supportsTools = (provider, modelId) => {
+        if (COMPAT_PROVIDERS.has(provider)) return true;
+        if (provider === "bedrock-nova") return /amazon\.nova|nova-lite|nova-micro|nova-pro/i.test(modelId || "");
+        return false;
+      };
+      const models = registry.listModels().filter((m) => liveSet.has(m.provider));
+      res.json({
+        object: "list",
+        data: models.map((m) => ({
+          id: m.id,
+          object: "model",
+          created: m.createdAt ? Math.floor(new Date(m.createdAt).getTime() / 1000) : 0,
+          owned_by: m.provider,
+          provider: m.provider,
+          label: m.label || m.id,
+          tier: m.tier,
+          inputPer1M: m.inputPer1M,
+          outputPer1M: m.outputPer1M,
+          toolCallSupported: supportsTools(m.provider, m.id),
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ error: "internal_error", message: String(err.message || err) });
+    }
   });
 
   // Task type discovery — lists all supported task types with tier and description.
