@@ -78,6 +78,31 @@ for await (const chunk of arbr.stream({ messages: "Tell me a story" })) {
 // generator return value is the full ChatResponse
 ```
 
+## `client.taskTypes() → Promise<TaskTypesResponse>`
+
+Returns all supported task types with their routing tier and a plain-English description. Use the `id` values as the `taskType` field in `chat()` calls to activate smart routing.
+
+```js
+const { data } = await arbr.taskTypes();
+
+// data is an array of { id, tier, label, description }
+// e.g. { id: "coding", tier: "mid", label: "Code generation", description: "Write a function…" }
+
+// Pick a task type for your use case:
+const taskType = "code-review"; // tier: mid
+const res = await arbr.chat({
+  messages: [{ role: "user", content: "Review this PR diff: …" }],
+  taskType,
+});
+```
+
+**Tier routing behaviour:**
+| Tier | Routed to | When to use |
+|------|-----------|-------------|
+| `light` | Cheapest fast model | FAQ, translation, classification, autocomplete |
+| `mid` | Balanced model | Code generation, support replies, extraction |
+| `premium` | Most capable model | Reasoning, architecture design, security audit |
+
 ## `client.status() → Promise<StatusResponse>`
 
 ```js

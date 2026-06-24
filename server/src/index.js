@@ -6,6 +6,7 @@ const cors = require("cors");
 const mongoose = require("mongoose");
 const { config, describe } = require("./config");
 const registry = require("./pricing/registry");
+const { TASK_CATALOG } = require("./classify/classifier");
 const { handleChat } = require("./gateway/handler");
 const { handleOpenAICompat } = require("./gateway/openaiCompat");
 const auth = require("./gateway/auth");
@@ -57,6 +58,11 @@ async function start() {
         outputPer1M: m.outputPer1M,
       })),
     });
+  });
+
+  // Task type discovery — lists all supported task types with tier and description.
+  app.get("/v1/task-types", auth.middleware, (_req, res) => {
+    res.json({ object: "list", data: TASK_CATALOG });
   });
 
   // Provider discovery — lists which providers are live (no credentials exposed).

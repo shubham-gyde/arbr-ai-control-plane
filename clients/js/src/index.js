@@ -260,7 +260,21 @@ function createClient(options = {}) {
     );
   }
 
-  return { chat, stream, status, models, providers, baseUrl };
+  /**
+   * List all supported task types — GET /v1/task-types.
+   * Returns `{ object: "list", data: [{ id, tier, label, description }] }`.
+   * Pass `taskType` from this list in chat() calls to enable smart routing.
+   */
+  async function taskTypes({ signal } = {}) {
+    return requestWithRetries(
+      fetchImpl,
+      `${baseUrl}/v1/task-types`,
+      { method: "GET", headers: baseHeaders },
+      { timeoutMs, retries, signal }
+    );
+  }
+
+  return { chat, stream, status, models, providers, taskTypes, baseUrl };
 }
 
 // ── LangChain-style adapter (duck-typed; no LangChain dependency) ─────────────

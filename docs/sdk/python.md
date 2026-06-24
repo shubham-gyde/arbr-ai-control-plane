@@ -97,6 +97,31 @@ for chunk in arbr.stream("Tell me a story"):
     print(chunk, end="", flush=True)
 ```
 
+## `Client.task_types() → dict`
+
+Returns all supported task types with routing tier and description. Use the `id` values as `task_type` in `chat()` calls to activate smart routing.
+
+```python
+result = arbr.task_types()
+# result["data"] is a list of dicts:
+# [{"id": "coding", "tier": "mid", "label": "Code generation", "description": "…"}, ...]
+
+# Async variant:
+result = await arbr.atask_types()
+
+# Example: pick a task type and use it
+task_type = "document analysis"   # tier: premium → routes to most capable model
+res = arbr.chat("Summarise and extract key clauses from this contract: …", task_type=task_type)
+```
+
+**Tier routing behaviour:**
+
+| Tier | Routed to | When to use |
+|------|-----------|-------------|
+| `light` | Cheapest fast model | FAQ, translation, classification, autocomplete |
+| `mid` | Balanced model | Code generation, support replies, extraction |
+| `premium` | Most capable model | Reasoning, architecture design, security audit |
+
 ## `Client.status() → dict`
 
 ```python

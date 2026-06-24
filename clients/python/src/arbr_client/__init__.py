@@ -436,6 +436,41 @@ class Client:
         """Async :meth:`providers`."""
         return await asyncio.to_thread(self.providers)
 
+    def task_types(self) -> dict:
+        """List all supported task types — GET /v1/task-types.
+
+        Returns a list of task type objects::
+
+            {
+              "object": "list",
+              "data": [
+                {
+                  "id": "coding",
+                  "tier": "mid",
+                  "label": "Code generation",
+                  "description": "Write a function, class, or script from a natural language description",
+                },
+                ...
+              ]
+            }
+
+        Pass ``id`` values as the ``task_type`` argument in :meth:`chat` calls
+        to enable smart routing. Task types in the ``light`` tier route to cheap
+        fast models; ``premium`` routes to the most capable model available.
+        """
+        return _request_with_retries(
+            f"{self.base_url}/v1/task-types",
+            method="GET",
+            body=None,
+            timeout_s=self._timeout_s,
+            retries=self._retries,
+            headers=self._headers,
+        )
+
+    async def atask_types(self) -> dict:
+        """Async :meth:`task_types`."""
+        return await asyncio.to_thread(self.task_types)
+
 
 def create_client(
     base_url: Optional[str] = None,

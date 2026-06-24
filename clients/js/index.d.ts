@@ -91,6 +91,21 @@ export interface ProvidersResponse {
   data: ArbrProvider[];
 }
 
+export type TaskTier = "light" | "mid" | "premium";
+
+export interface TaskType {
+  /** Pass this value as `taskType` in chat() calls to enable smart routing. */
+  id: string;
+  tier: TaskTier;
+  label: string;
+  description: string;
+}
+
+export interface TaskTypesResponse {
+  object: "list";
+  data: TaskType[];
+}
+
 export interface ClientOptions {
   /** Gateway origin, e.g. "http://localhost:4100". Falls back to ARBR_GATEWAY_URL. */
   baseUrl?: string;
@@ -163,6 +178,8 @@ export interface Client {
   models(opts?: { signal?: AbortSignal }): Promise<ModelsResponse>;
   /** List configured live providers — GET /v1/providers. */
   providers(opts?: { signal?: AbortSignal }): Promise<ProvidersResponse>;
+  /** List all supported task types with tier and description — GET /v1/task-types. */
+  taskTypes(opts?: { signal?: AbortSignal }): Promise<TaskTypesResponse>;
   baseUrl: string;
 }
 
