@@ -106,10 +106,11 @@ function createRouter(options) {
 
 // ───── provider adapters ──────────────────────────────────────────────────
 
-// Claude 4.x (Opus 4.8 / 4.7) reject temperature / top_p / budget_tokens with a
-// 400. Detect those model ids so the anthropic adapter can omit temperature.
+// Reasoning models that reject temperature/top_p with a ValidationException:
+//   - Claude Opus 4.8 / 4.7 (Anthropic)
+//   - DeepSeek R1 variants on Bedrock (us.deepseek.r1-v1:0, etc.)
 function rejectsSamplingParams(modelId) {
-  return /opus-4-(7|8)/.test(modelId || "");
+  return /opus-4-(7|8)|deepseek.r1/i.test(modelId || "");
 }
 
 function loadProviderModel(providerId, cfg, { temperature, maxTokens }) {
@@ -126,13 +127,15 @@ function loadProviderModel(providerId, cfg, { temperature, maxTokens }) {
   }
   if (providerId === "bedrock-nova") {
     const { ChatBedrockConverse } = require("@langchain/aws");
-    return new ChatBedrockConverse({
+    const bedrockParams = {
       model: cfg.model,
       region: cfg.region,
       credentials: cfg.credentials, // {accessKeyId, secretAccessKey} — caller's responsibility
-      temperature: t,
       maxTokens: mx,
-    });
+    };
+    // Reasoning models (DeepSeek R1) reject temperature with a ValidationException.
+    if (!rejectsSamplingParams(cfg.model)) bedrockParams.temperature = t;
+    return new ChatBedrockConverse(bedrockParams);
   }
   if (providerId === "openai") {
     const { ChatOpenAI } = require("@langchain/openai");

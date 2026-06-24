@@ -281,14 +281,16 @@ async function handleChat(req, res) {
       maxTokens: body.maxTokens,
     });
   } catch (err) {
+    const errorMessage = String(err.message || err);
     setImmediate(() =>
       logger.write({
         requestId, timestamp, ...meta,
         provider: served.provider, model: served.model, modelRequested,
         taskType, classifiedBy, latencyMs: 0, status: "failure", routingDecision,
+        errorMessage,
       })
     );
-    return res.status(502).json({ error: "provider_error", message: String(err.message || err) });
+    return res.status(502).json({ error: "provider_error", message: errorMessage });
   }
 
   const { result, usedFallback } = invocation;

@@ -33,6 +33,7 @@ const requestRecordSchema = new mongoose.Schema(
     // performance + outcome
     latencyMs: { type: Number, default: 0 },
     status: { type: String, enum: ["success", "failure", "blocked"], default: "success", index: true },
+    errorMessage: { type: String, default: null },   // provider error text on status:"failure"
     retryCount: { type: Number, default: 0 },
 
     // routing transparency

@@ -155,7 +155,7 @@ async function proxyOpenAICompat(ctx) {
       body: JSON.stringify(upstreamBody),
     });
   } catch (err) {
-    logRecord({ latencyMs: Date.now() - start, status: "failure" });
+    logRecord({ latencyMs: Date.now() - start, status: "failure", errorMessage: String(err.message || err) });
     return res.status(502).json({
       error: { message: String(err.message || err), type: "server_error", code: "provider_error" },
     });
@@ -166,7 +166,8 @@ async function proxyOpenAICompat(ctx) {
     const data = await upstream.json().catch(() => null);
     const latencyMs = Date.now() - start;
     if (!upstream.ok || !data) {
-      logRecord({ latencyMs, status: "failure" });
+      const errMsg = data?.error?.message || `upstream ${upstream.status}`;
+      logRecord({ latencyMs, status: "failure", errorMessage: errMsg });
       return res
         .status(upstream.status || 502)
         .json(data || { error: { message: "Upstream error", type: "server_error" } });
@@ -228,7 +229,7 @@ async function proxyOpenAICompat(ctx) {
   } catch (err) {
     try { res.write(`data: ${JSON.stringify({ error: String(err.message || err) })}\n\n`); } catch { /* client gone */ }
     res.end();
-    logRecord({ latencyMs: Date.now() - start, status: "failure" });
+    logRecord({ latencyMs: Date.now() - start, status: "failure", errorMessage: String(err.message || err) });
   }
 }
 
@@ -379,16 +380,17 @@ async function handleOpenAICompat(req, res) {
         })
       );
     } catch (err) {
+      const errorMessage = String(err.message || err);
       setImmediate(() =>
         logger.write({
           requestId, timestamp, ...meta,
           provider: served.provider, model: served.model, modelRequested,
           taskType, classifiedBy, latencyMs: Date.now() - start,
-          status: "failure", routingDecision, cacheHit: false,
+          status: "failure", routingDecision, cacheHit: false, errorMessage,
         })
       );
       return res.status(502).json({
-        error: { message: String(err.message || err), type: "server_error", code: "provider_error" },
+        error: { message: errorMessage, type: "server_error", code: "provider_error" },
       });
     }
     return;
@@ -421,14 +423,15 @@ async function handleOpenAICompat(req, res) {
         maxTokens: body.max_tokens,
       });
     } catch (err) {
-      res.write(`data: ${JSON.stringify({ error: String(err.message || err) })}\n\n`);
+      const errorMessage = String(err.message || err);
+      res.write(`data: ${JSON.stringify({ error: errorMessage })}\n\n`);
       res.end();
       setImmediate(() =>
         logger.write({
           requestId, timestamp, ...meta,
           provider: served.provider, model: served.model, modelRequested,
           taskType, classifiedBy, latencyMs: Date.now() - start,
-          status: "failure", routingDecision, cacheHit: false,
+          status: "failure", routingDecision, cacheHit: false, errorMessage,
         })
       );
       return;
@@ -493,15 +496,17 @@ async function handleOpenAICompat(req, res) {
       maxTokens: body.max_tokens,
     });
   } catch (err) {
+    const errorMessage = String(err.message || err);
     setImmediate(() =>
       logger.write({
         requestId, timestamp, ...meta,
         provider: served.provider, model: served.model, modelRequested,
         taskType, classifiedBy, latencyMs: 0, status: "failure", routingDecision,
+        errorMessage,
       })
     );
     return res.status(502).json({
-      error: { message: String(err.message || err), type: "server_error", code: "provider_error" },
+      error: { message: errorMessage, type: "server_error", code: "provider_error" },
     });
   }
 
