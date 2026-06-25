@@ -142,7 +142,7 @@ function CapRow({ cap, onRefresh }) {
   );
 }
 
-function CreateForm({ providers, onCreated }) {
+function CreateForm({ providers, applications, onCreated }) {
   const [dim, setDim] = useState("application");
   const [value, setValue] = useState("");
   const [period, setPeriod] = useState("day");
@@ -185,12 +185,19 @@ function CreateForm({ providers, onCreated }) {
         </div>
 
         <div>
-          <div className="label mb-1">{dim === "application" ? "Application name" : "Provider"}</div>
+          <div className="label mb-1">{dim === "application" ? "Application" : "Provider"}</div>
           {dim === "provider" ? (
             <select className="input" value={value} onChange={(e) => setValue(e.target.value)}>
               <option value="">— pick provider —</option>
               {providers.map((p) => (
                 <option key={p.id} value={p.id}>{p.id}</option>
+              ))}
+            </select>
+          ) : applications.length > 0 ? (
+            <select className="input w-44" value={value} onChange={(e) => setValue(e.target.value)}>
+              <option value="">— pick application —</option>
+              {applications.map((a) => (
+                <option key={a} value={a}>{a}</option>
               ))}
             </select>
           ) : (
@@ -253,12 +260,16 @@ function CreateForm({ providers, onCreated }) {
 export default function Budgets({ onChange }) {
   const [caps, setCaps] = useState(null);
   const [providers, setProviders] = useState([]);
+  const [applications, setApplications] = useState([]);
 
   const load = async () => {
     try {
-      const [c, p] = await Promise.all([api.caps(), api.gatewayProviders()]);
+      const [c, p, f] = await Promise.all([api.caps(), api.gatewayProviders(), api.facets()]);
       setCaps(c.data ?? c);
       setProviders(p.data ?? p);
+      // facets returns { application: [...], provider: [...], ... } — filter out "unknown"
+      const apps = (f.application || []).filter((a) => a && a !== "unknown").sort();
+      setApplications(apps);
     } catch { setCaps([]); }
   };
 
@@ -311,7 +322,7 @@ export default function Budgets({ onChange }) {
 
       {/* Create form */}
       <Card title="Add budget constraint">
-        <CreateForm providers={providers} onCreated={reload} />
+        <CreateForm providers={providers} applications={applications} onCreated={reload} />
       </Card>
 
       {/* List */}
