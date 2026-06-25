@@ -9,6 +9,7 @@ const registry = require("./pricing/registry");
 const { TASK_CATALOG } = require("./classify/classifier");
 const { handleChat } = require("./gateway/handler");
 const { handleOpenAICompat } = require("./gateway/openaiCompat");
+const { supportsTools } = require("./gateway/capabilities");
 const auth = require("./gateway/auth");
 const adminAuth = require("./api/adminAuth");
 const apiRoutes = require("./api/routes");
@@ -51,12 +52,6 @@ async function start() {
     try {
       const eff = await connections.effective();
       const liveSet = new Set(eff.liveIds);
-      const COMPAT_PROVIDERS = new Set(["openai", "deepseek", "moonshot", "xai", "groq", "litellm"]);
-      const supportsTools = (provider, modelId) => {
-        if (COMPAT_PROVIDERS.has(provider)) return true;
-        if (provider === "bedrock-nova") return /amazon\.nova|nova-lite|nova-micro|nova-pro/i.test(modelId || "");
-        return false;
-      };
       const models = registry.listModels().filter((m) => liveSet.has(m.provider));
       res.json({
         object: "list",

@@ -8,6 +8,7 @@ const Recommendation = require("../models/Recommendation");
 const Cap = require("../models/Cap");
 const ApiKey = require("../models/ApiKey");
 const auth = require("../gateway/auth");
+const { supportsTools } = require("../gateway/capabilities");
 const capEngine = require("../routing/capEngine");
 const crypto = require("crypto");
 const analytics = require("../analytics/aggregate");
@@ -348,7 +349,10 @@ router.post("/custom-providers/:id/test", async (req, res) => {
 // ── model registry ──
 router.get("/models", (_req, res) => {
   // eslint-disable-next-line no-unused-vars
-  res.json(pricing.listModels().map(({ _id, __v, ...m }) => m));
+  res.json(pricing.listModels().map(({ _id, __v, ...m }) => ({
+    ...m,
+    toolCallSupported: supportsTools(m.provider, m.id),
+  })));
 });
 
 // Live test — send a user message to a specific model and return the response.

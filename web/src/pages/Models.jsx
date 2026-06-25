@@ -99,6 +99,7 @@ function ModelMetaPanel({ model }) {
   const chips = [
     model.supportsReasoning === true  && "Reasoning",
     model.supportsVision    === true  && "Vision",
+    model.toolCallSupported === true  && "Tool calls",
   ].filter(Boolean);
 
   if (!rows.length && !chips.length) return null;

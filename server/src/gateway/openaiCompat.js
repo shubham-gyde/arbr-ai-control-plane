@@ -341,8 +341,9 @@ async function handleOpenAICompat(req, res) {
 
   // Native tool invocation: NATIVE_TOOL_PROVIDERS (e.g. bedrock-nova) support tools via
   // LangChain's .bindTools(). Bypass the generic invoke path (which has no tool support)
-  // and call the model directly. Always returns non-streaming — the tool_calls turn is
-  // typically a single decision; the client sends the tool result back in a follow-up call.
+  // and call the model directly using invoke() — tool_calls come back in one shot.
+  // When stream:true, the result is emitted as SSE tool_call delta chunks so streaming
+  // clients (LibreChat, gyde-chat) receive the tool_calls turn in the expected SSE format.
   if (isNativeToolModel(served.provider, served.model) && Array.isArray(body.tools) && body.tools.length > 0) {
     const start = Date.now();
     try {
@@ -362,21 +363,61 @@ async function handleOpenAICompat(req, res) {
       const completionTokens = um.output_tokens || 0;
       const totalTokens = um.total_tokens || (promptTokens + completionTokens);
 
-      res.json({
-        id: `chatcmpl-${requestId}`,
-        object: "chat.completion",
-        model: served.model,
-        choices: [{
-          index: 0,
-          message: {
-            role: "assistant",
-            content: toolCalls?.length ? null : chunkText(aiMsg),
-            tool_calls: toolCalls,
-          },
-          finish_reason: finishReason,
-        }],
-        usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: totalTokens },
-      });
+      if (body.stream) {
+        // Emit tool_calls as SSE deltas so streaming clients receive the tool call turn
+        // in the standard OpenAI chunk format. We got all tool_calls from invoke() at
+        // once, so each tool call is emitted as a single chunk (no character-by-character
+        // streaming of arguments — clients reassemble from deltas regardless).
+        res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache",
+                  Connection: "keep-alive", "X-Accel-Buffering": "no" });
+        res.flushHeaders();
+        const id = `chatcmpl-${requestId}`;
+        const base = { id, object: "chat.completion.chunk", model: served.model };
+
+        // 1. role delta
+        res.write(`data: ${JSON.stringify({
+          ...base, choices: [{ index: 0, delta: { role: "assistant", content: null }, finish_reason: null }],
+        })}\n\n`);
+
+        // 2. one chunk per tool call with full arguments
+        if (toolCalls?.length) {
+          for (let i = 0; i < toolCalls.length; i++) {
+            const tc = toolCalls[i];
+            res.write(`data: ${JSON.stringify({
+              ...base, choices: [{ index: 0, delta: {
+                tool_calls: [{ index: i, id: tc.id, type: "function",
+                  function: { name: tc.function.name, arguments: tc.function.arguments } }],
+              }, finish_reason: null }],
+            })}\n\n`);
+          }
+        }
+
+        // 3. finish chunk
+        res.write(`data: ${JSON.stringify({
+          ...base,
+          choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
+          usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: totalTokens },
+        })}\n\n`);
+
+        res.write("data: [DONE]\n\n");
+        res.end();
+      } else {
+        res.json({
+          id: `chatcmpl-${requestId}`,
+          object: "chat.completion",
+          model: served.model,
+          choices: [{
+            index: 0,
+            message: {
+              role: "assistant",
+              content: toolCalls?.length ? null : chunkText(aiMsg),
+              tool_calls: toolCalls,
+            },
+            finish_reason: finishReason,
+          }],
+          usage: { prompt_tokens: promptTokens, completion_tokens: completionTokens, total_tokens: totalTokens },
+        });
+      }
 
       setImmediate(() =>
         logger.write({
@@ -398,6 +439,16 @@ async function handleOpenAICompat(req, res) {
           status: "failure", routingDecision, cacheHit: false, errorMessage,
         })
       );
+      if (body.stream) {
+        // Send error in SSE format so streaming clients don't hang
+        if (!res.headersSent) {
+          res.set({ "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+          res.flushHeaders();
+        }
+        res.write(`data: ${JSON.stringify({ error: { message: errorMessage, type: "server_error", code: "provider_error" } })}\n\n`);
+        res.write("data: [DONE]\n\n");
+        return res.end();
+      }
       return res.status(502).json({
         error: { message: errorMessage, type: "server_error", code: "provider_error" },
       });
