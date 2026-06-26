@@ -837,7 +837,7 @@ router.put("/app-configs/:app", async (req, res, next) => {
 
 router.post("/app-configs/:app/generate-policy", async (req, res, next) => {
   try {
-    const { r, eff } = await getRouter();
+    const { router: r, eff } = await getRouter();
     if (!r) return res.status(503).json({ error: "no live providers — cannot generate policy" });
     const excludeModels = Array.isArray(req.body?.excludeModels) ? req.body.excludeModels : [];
     const result = await aiPolicy.regenerateForApp({ router: r, eff, excludeModels });
