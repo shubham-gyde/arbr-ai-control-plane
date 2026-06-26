@@ -22,16 +22,18 @@ const NAV_GROUPS = [
 const FOOTER_LINK = { to: "/docs", label: "Docs" };
 
 function navClass({ isActive }) {
-  return `mx-1 my-0.5 block rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-    isActive ? "bg-gyde-green-600 text-white" : "text-gray-600 hover:bg-gyde-green-50 hover:text-gyde-charcoal"
+  return `mx-1 my-0.5 flex items-center rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+    isActive
+      ? "bg-gyde-green-600 text-white"
+      : "text-gray-400 hover:bg-white/8 hover:text-white"
   }`;
 }
 
 function Wordmark() {
   return (
     <div className="flex items-baseline gap-0.5">
-      <span className="text-xl font-bold tracking-tight text-gyde-charcoal">ARBR</span>
-      <span className="text-xl font-bold text-gyde-green-600">.</span>
+      <span className="text-xl font-bold tracking-tight text-white">ARBR</span>
+      <span className="text-xl font-bold text-gyde-green-400">.</span>
     </div>
   );
 }
@@ -39,15 +41,18 @@ function Wordmark() {
 export default function Layout({ status, onSignOut, children }) {
   return (
     <div className="flex min-h-full">
-      <aside className="sticky top-0 flex h-screen w-64 flex-col border-r border-gray-200 bg-white">
-        <div className="px-6 py-6">
+      <aside className="sticky top-0 flex h-screen w-56 flex-col bg-gyde-charcoal">
+        <div className="px-5 py-5">
           <Wordmark />
-          <div className="mt-1 text-xs text-gray-500">Control Plane · Phase 1</div>
+          <div className="mt-1 text-[11px] text-gray-500">Control Plane · Phase 1</div>
         </div>
-        <nav className="min-h-0 flex-1 overflow-y-auto px-3">
-          {NAV_GROUPS.map((group) => (
-            <div key={group.section} className="mb-4">
-              <div className="px-3 pb-1 label">{group.section}</div>
+
+        <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-1">
+          {NAV_GROUPS.map((group, gi) => (
+            <div key={group.section} className={gi > 0 ? "mt-5" : ""}>
+              <div className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-widest text-gray-600">
+                {group.section}
+              </div>
               {group.items.map((item) => (
                 <NavLink key={item.to} to={item.to} end={item.end} className={navClass}>
                   {item.label}
@@ -56,13 +61,15 @@ export default function Layout({ status, onSignOut, children }) {
             </div>
           ))}
         </nav>
-        <div className="border-t border-gray-200 px-3 pt-3 pb-1">
+
+        <div className="border-t border-white/8 px-2 py-3">
           <NavLink to={FOOTER_LINK.to} className={navClass}>{FOOTER_LINK.label}</NavLink>
         </div>
-        <div className="px-6 py-4 text-xs text-gray-400">
+
+        <div className="px-5 py-4 text-[11px] text-gray-600">
           A human approves the policy; rules always override.
           {getAdminToken() && onSignOut && (
-            <button onClick={onSignOut} className="mt-2 block text-xs text-gray-500 underline hover:text-gyde-charcoal">
+            <button onClick={onSignOut} className="mt-2 block text-gray-500 hover:text-gray-300 underline">
               Sign out
             </button>
           )}
