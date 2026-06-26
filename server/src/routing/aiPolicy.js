@@ -214,7 +214,7 @@ function scoreModel(taskCaps, model, cheapestCost) {
   return { capScore, costScore };
 }
 
-// Core scoring engine — shared by regenerate() and regenerateForApp().
+// Core scoring engine — shared by regenerate() and computeAssignments().
 // excludeModels: array of model IDs to exclude from consideration.
 async function _computeAssignments({ router, eff, excludeModels = [] }) {
   if (!eff) throw new Error("no effective config");
@@ -227,15 +227,65 @@ async function _computeAssignments({ router, eff, excludeModels = [] }) {
 
   if (!liveModels.length) throw new Error("no live models available after exclusions");
 
+  const generatorModel = liveModels[0];
+  const tasks          = await allTaskTypes();
+  const catalogMap     = Object.fromEntries(TASK_CATALOG.map((t) => [t.id, t]));
+  const validIds       = new Set(liveModels.map((m) => m.id));
+
+  // ── Attempt a single LLM call to generate all assignments at once ─────────
+  try {
+    const modelList = liveModels.map((m) =>
+      `  - ${m.id} (tier: ${m.tier || "?"}, $${(m.inputPer1M || 0).toFixed(2)}/1M tokens in)`
+    ).join("\n");
+
+    const taskList = tasks.map((t) => {
+      const meta = catalogMap[t];
+      return `  - ${t}${meta ? ` — ${meta.description || meta.label || ""}` : ""}`;
+    }).join("\n");
+
+    const prompt =
+      `You are routing policy generator for an AI gateway. Assign the single best model to each task type.\n\n` +
+      `Available models (choose ONLY from this list):\n${modelList}\n\n` +
+      `Task types to assign:\n${taskList}\n\n` +
+      `Rules:\n` +
+      `- Use light-tier models for simple/cheap tasks, premium for complex reasoning\n` +
+      `- Vary assignments — don't give every task the same model\n` +
+      `- Choose the model best suited for each task's requirements\n\n` +
+      `Return ONLY a valid JSON object mapping each task ID to one model ID. Example:\n` +
+      `{"faq":"model-a","coding":"model-b","translation":"model-c"}`;
+
+    const resp = await router.complete({
+      messages: [{ role: "user", content: prompt }],
+      providerOverride: generatorModel.provider,
+      modelOverride:    generatorModel.id,
+      temperature: 0.2,
+      maxTokens:   1200,
+    });
+
+    const raw = parseJsonBlock(resp.text || "");
+    if (raw && typeof raw === "object") {
+      const assignments = {};
+      for (const task of tasks) {
+        const assigned = raw[task];
+        // accept the LLM's choice only if it picked a valid live model
+        assignments[task] = validIds.has(assigned) ? assigned : _scoringFallback(task, liveModels, catalogMap, eff);
+      }
+      return { assignments, generatorModel };
+    }
+  } catch (_e) { /* fall through to scoring matrix */ }
+
+  // ── Scoring matrix fallback ───────────────────────────────────────────────
+  const assignments = {};
+  for (const task of tasks) {
+    assignments[task] = _scoringFallback(task, liveModels, catalogMap, eff);
+  }
+  return { assignments, generatorModel };
+}
+
+function _scoringFallback(task, liveModels, catalogMap, eff) {
   const byTier = { light: [], mid: [], premium: [] };
   for (const m of liveModels) { if (byTier[m.tier]) byTier[m.tier].push(m); }
-
-  const hardFallback   = eff.defaultModel && !excludeSet.has(eff.defaultModel)
-    ? eff.defaultModel : liveModels[0].id;
-  const generatorModel = liveModels[0];
-
-  const tasks      = await allTaskTypes();
-  const catalogMap = Object.fromEntries(TASK_CATALOG.map((t) => [t.id, t]));
+  const hardFallback = liveModels[0].id;
 
   function poolFor(tier) {
     if (tier === "premium") return liveModels;
@@ -245,54 +295,18 @@ async function _computeAssignments({ router, eff, excludeModels = [] }) {
     return p.length ? p : liveModels;
   }
 
-  function bestForTask(taskCaps, tier) {
-    const pool     = poolFor(tier);
-    const cheapest = Math.min(...pool.map((m) => m.inputPer1M || 0.001));
-    const cs       = COST_SENSITIVITY[tier] || 0.25;
-    let best = pool[0], bestScore = -1;
-    for (const m of pool) {
-      const { capScore, costScore } = scoreModel(taskCaps, m, cheapest);
-      const final = (1 - cs) * capScore + cs * costScore;
-      if (final > bestScore) { bestScore = final; best = m; }
-    }
-    return best?.id || hardFallback;
+  const tier     = catalogMap[task]?.tier || "mid";
+  const taskCaps = TASK_CAPABILITIES[task] || { coding:0.3, reasoning:0.3, writing:0.3, analysis:0.3, language:0.1, general:0.5, data:0.2 };
+  const pool     = poolFor(tier);
+  const cheapest = Math.min(...pool.map((m) => m.inputPer1M || 0.001));
+  const cs       = COST_SENSITIVITY[tier] || 0.25;
+  let best = pool[0], bestScore = -1;
+  for (const m of pool) {
+    const { capScore, costScore } = scoreModel(taskCaps, m, cheapest);
+    const final = (1 - cs) * capScore + cs * costScore;
+    if (final > bestScore) { bestScore = final; best = m; }
   }
-
-  const customCaps = {};
-  async function evalCustomTask(task) {
-    if (customCaps[task]) return customCaps[task];
-    try {
-      const r = await router.complete({
-        messages: [{ role: "user", content:
-          `Rate this developer task type on 7 capability dimensions (0.0–1.0 each).\n` +
-          `Task: "${task}"\n` +
-          `Return ONLY valid JSON with exactly these keys:\n` +
-          `{"coding":0,"reasoning":0,"writing":0,"analysis":0,"language":0,"general":0,"data":0}`,
-        }],
-        providerOverride: generatorModel.provider,
-        modelOverride:    generatorModel.id,
-        temperature: 0,
-        maxTokens:   200,
-      });
-      const raw = parseJsonBlock(r.text || "");
-      if (raw && DIMS.every((d) => typeof raw[d] === "number" && raw[d] >= 0 && raw[d] <= 1)) {
-        customCaps[task] = raw; return raw;
-      }
-    } catch (_e) { /* fall through */ }
-    const fallback = { coding:0.3, reasoning:0.3, writing:0.3, analysis:0.3, language:0.1, general:0.5, data:0.2 };
-    customCaps[task] = fallback;
-    return fallback;
-  }
-
-  const assignments = {};
-  for (const task of tasks) {
-    let taskCaps = TASK_CAPABILITIES[task];
-    if (!taskCaps) taskCaps = await evalCustomTask(task);
-    const tier = catalogMap[task]?.tier || "mid";
-    assignments[task] = bestForTask(taskCaps, tier);
-  }
-
-  return { assignments, generatorModel };
+  return best?.id || hardFallback;
 }
 
 // Policy engine — saves global AI policy to Settings.
