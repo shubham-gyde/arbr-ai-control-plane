@@ -133,6 +133,21 @@ export function Spinner() {
   return <div className="text-sm text-gray-400">Loading…</div>;
 }
 
+export function ConfirmDialog({ title, message, confirmLabel = "Confirm", onConfirm, onCancel }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="w-full max-w-sm rounded-xl border border-gray-200 bg-white p-6 shadow-xl">
+        <h3 className="text-base font-semibold text-gyde-charcoal">{title}</h3>
+        {message && <p className="mt-2 text-sm text-gray-500">{message}</p>}
+        <div className="mt-5 flex justify-end gap-3">
+          <button className="btn-ghost text-sm" onClick={onCancel}>Cancel</button>
+          <button className="btn-secondary text-sm" onClick={onConfirm}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function CodeBlock({ code, lang }) {
   const [copied, setCopied] = React.useState(false);
   const copy = async () => {

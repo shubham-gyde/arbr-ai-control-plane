@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../api.js";
-import { Card, Table, Toggle, Badge, Spinner, Tabs, useTabParam } from "../components/ui.jsx";
+import { Card, Table, Toggle, Badge, Spinner, Tabs, useTabParam, ConfirmDialog } from "../components/ui.jsx";
 import Recommendations from "./Recommendations.jsx";
 
 const TABS = [
@@ -191,12 +191,14 @@ function AiPolicyEditor({ models }) {
   const [assignments, setAssignments] = useState({});
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [confirmRegen, setConfirmRegen] = useState(false);
   const [expanded, setExpanded] = useState({ light: false, mid: false, premium: false, custom: true });
   const load = () => api.aiPolicy().then((p) => { setPol(p); setAssignments({ ...p.assignments }); }).catch((e) => setMsg(e.message));
   useEffect(() => { load(); }, []);
   if (!pol) return <Spinner />;
 
   const regen = async () => {
+    setConfirmRegen(false);
     setBusy(true); setMsg("Generating policy with AI…");
     try {
       const p = await api.regenerateAiPolicy();
@@ -237,8 +239,17 @@ function AiPolicyEditor({ models }) {
 
   return (
     <div className="space-y-4">
+      {confirmRegen && (
+        <ConfirmDialog
+          title="Regenerate default policy?"
+          message="This will overwrite all current task assignments with AI-generated ones. This cannot be undone."
+          confirmLabel="Regenerate"
+          onConfirm={regen}
+          onCancel={() => setConfirmRegen(false)}
+        />
+      )}
       <div className="flex flex-wrap items-center gap-3">
-        <button className="btn-secondary" disabled={busy} onClick={regen}>{busy ? "Generating…" : "Generate with AI"}</button>
+        <button className="btn-secondary" disabled={busy} onClick={() => setConfirmRegen(true)}>{busy ? "Generating…" : "Generate with AI"}</button>
         <button className="btn-outline" disabled={busy} onClick={save}>Save edits</button>
         {pol.generatedAt && (
           <span className="text-xs text-gray-500">

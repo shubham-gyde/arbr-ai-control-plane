@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { api, fmt } from "../api.js";
-import { Card, Badge, Spinner, Toggle, Tabs, useTabParam } from "../components/ui.jsx";
+import { Card, Badge, Spinner, Toggle, Tabs, useTabParam, ConfirmDialog } from "../components/ui.jsx";
 import RequestsTable from "../components/RequestsTable.jsx";
 
 const TABS = [
@@ -121,6 +121,7 @@ function RoutingPolicyTab({ appName, initialAssignments, initialModelOptOut, mod
   const [expanded, setExpanded]       = useState({ light: false, mid: false, premium: false, custom: true });
   const [busy, setBusy]               = useState(false);
   const [msg, setMsg]                 = useState(null);
+  const [confirmGen, setConfirmGen]   = useState(false);
 
   useEffect(() => { api.aiPolicy().then(setGlobalPol).catch((e) => setMsg(e.message)); }, []);
 
@@ -159,6 +160,7 @@ function RoutingPolicyTab({ appName, initialAssignments, initialModelOptOut, mod
 
   // Generate uses excluded as the exclusion list automatically.
   const generate = async () => {
+    setConfirmGen(false);
     setBusy(true); setMsg("Generating with AI…");
     try {
       const result = await api.generateAppPolicy(appName, excluded);
@@ -181,16 +183,6 @@ function RoutingPolicyTab({ appName, initialAssignments, initialModelOptOut, mod
     finally { setBusy(false); }
   };
 
-  const promoteToDefault = async () => {
-    if (!assignments) return;
-    setBusy(true); setMsg(null);
-    try {
-      await api.setAppDefaultPolicy(appName);
-      setMsg("Set as global default."); setTimeout(() => setMsg(null), 2000);
-    } catch (e) { setMsg(e.message); }
-    finally { setBusy(false); }
-  };
-
   return (
     <div className="space-y-5">
 
@@ -204,6 +196,15 @@ function RoutingPolicyTab({ appName, initialAssignments, initialModelOptOut, mod
 
       {/* ── Section 2: Routing policy ── */}
       <Card title="Routing policy">
+        {confirmGen && (
+          <ConfirmDialog
+            title="Generate policy with AI?"
+            message={`The AI will assign models to all task types using the ${models.length - excluded.length} allowed model${models.length - excluded.length !== 1 ? "s" : ""}. Existing assignments will be overwritten.`}
+            confirmLabel="Generate"
+            onConfirm={generate}
+            onCancel={() => setConfirmGen(false)}
+          />
+        )}
         <div className="space-y-4">
           {/* Action bar */}
           <div className="flex flex-wrap items-center gap-3">
@@ -212,17 +213,16 @@ function RoutingPolicyTab({ appName, initialAssignments, initialModelOptOut, mod
                 <div className="flex-1 text-sm text-gray-500">
                   Using <strong>global default</strong> policy.
                 </div>
-                <button className="btn-secondary text-xs" disabled={busy} onClick={generate}>
+                <button className="btn-secondary text-xs" disabled={busy} onClick={() => setConfirmGen(true)}>
                   {busy ? "Generating…" : `Generate with AI${excluded.length > 0 ? ` (${models.length - excluded.length} models)` : ""}`}
                 </button>
               </>
             ) : (
               <>
                 <button className="btn-secondary text-xs" disabled={busy} onClick={save}>Save</button>
-                <button className="btn-outline text-xs" disabled={busy} onClick={generate}>
+                <button className="btn-outline text-xs" disabled={busy} onClick={() => setConfirmGen(true)}>
                   {busy ? "Generating…" : `Regenerate with AI${excluded.length > 0 ? ` (${models.length - excluded.length} models)` : ""}`}
                 </button>
-                <button className="btn-outline text-xs" disabled={busy} onClick={promoteToDefault}>Set as global default</button>
                 <button className="btn-ghost text-xs" disabled={busy} onClick={resetToGlobal}>Reset to global default</button>
               </>
             )}
