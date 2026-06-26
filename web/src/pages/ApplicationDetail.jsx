@@ -75,13 +75,23 @@ function ModelPicker({ models, excluded, onChange }) {
           return (
             <div key={prov}>
               {/* Provider row */}
-              <div className="flex items-center justify-between bg-gray-50/70 px-3 py-1.5">
-                <span className="text-xs font-semibold uppercase tracking-wide text-gray-400">{prov}</span>
-                <div className="flex gap-2">
-                  <button className="text-xs text-gyde-green-600 hover:underline" onClick={() => selectAll(provIds)}>all</button>
-                  <button className="text-xs text-gray-400 hover:underline" onClick={() => deselectAll(provIds)}>none</button>
-                </div>
-              </div>
+              {(() => {
+                const allIn  = provIds.every((id) => !excluded.includes(id));
+                const someIn = provIds.some((id) => !excluded.includes(id));
+                return (
+                  <label className="flex cursor-pointer items-center gap-2.5 bg-gray-50/70 px-3 py-1.5 hover:bg-gray-100/60 transition-colors">
+                    <input
+                      type="checkbox"
+                      ref={(el) => { if (el) el.indeterminate = someIn && !allIn; }}
+                      checked={allIn}
+                      onChange={() => allIn ? deselectAll(provIds) : selectAll(provIds)}
+                      className="rounded shrink-0"
+                    />
+                    <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">{prov}</span>
+                    <span className="ml-auto text-xs text-gray-400">{provIds.filter((id) => !excluded.includes(id)).length}/{provIds.length}</span>
+                  </label>
+                );
+              })()}
               {/* Model rows */}
               {filtered.map((m) => {
                 const included = !excluded.includes(m.id);
