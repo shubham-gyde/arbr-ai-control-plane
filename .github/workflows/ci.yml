@@ -21,6 +21,9 @@ jobs:
       - name: Install server dependencies
         run: npm ci
 
+      - name: Lint server
+        run: npm run lint
+
       - name: Install web dependencies
         run: npm --prefix web ci
 

@@ -5,12 +5,12 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Server deps
-COPY package.json ./
-RUN npm install --omit=dev
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
 # Web deps + build
-COPY web/package.json ./web/package.json
-RUN npm --prefix web install
+COPY web/package.json web/package-lock.json ./web/
+RUN npm --prefix web ci
 COPY web ./web
 RUN npm --prefix web run build
 
