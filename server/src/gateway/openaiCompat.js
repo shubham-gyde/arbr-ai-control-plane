@@ -154,7 +154,7 @@ function translateToolCalls(toolCalls) {
 async function proxyOpenAICompat(ctx) {
   const {
     res, body, served, modelRequested, meta, requestId, timestamp,
-    taskType, classifiedBy, routingDecision, eff, baseURL,
+    taskType, classifiedBy, difficulty, confidence, routingDecision, eff, baseURL,
   } = ctx;
 
   const apiKey = eff.providers[served.provider]?.credential?.apiKey || "none";
@@ -167,7 +167,7 @@ async function proxyOpenAICompat(ctx) {
       logger.write({
         requestId, timestamp, ...meta,
         provider: served.provider, model: served.model, modelRequested,
-        taskType, classifiedBy, routingDecision, cacheHit: false,
+        taskType, classifiedBy, difficulty, confidence, routingDecision, cacheHit: false,
         knownPricing: served.knownPricing,
         ...extra,
       })
@@ -308,9 +308,9 @@ async function handleOpenAICompat(req, res) {
     allowedModels: req.apiKey?.allowedModels || [],
     defaultModel: req.apiKey?.defaultModel || null,
   };
-  let served, routingDecision, taskType, classifiedBy;
+  let served, routingDecision, taskType, classifiedBy, difficulty, confidence;
   try {
-    ({ served, routingDecision, taskType, classifiedBy } =
+    ({ served, routingDecision, taskType, classifiedBy, difficulty, confidence } =
       await resolveRoute(normalized, { router, eff, application: meta.application, workflow: meta.workflow, appConfig }));
   } catch (err) {
     if (err.code === "model_not_allowed") {
@@ -383,7 +383,7 @@ async function handleOpenAICompat(req, res) {
       routing: routingDecision, taskType });
     return proxyOpenAICompat({
       res, body, served, modelRequested, meta, requestId, timestamp,
-      taskType, classifiedBy, routingDecision, eff, baseURL: compatBaseURL,
+      taskType, classifiedBy, difficulty, confidence, routingDecision, eff, baseURL: compatBaseURL,
     });
   }
 
@@ -492,7 +492,7 @@ async function handleOpenAICompat(req, res) {
         logger.write({
           requestId, timestamp, ...meta,
           provider: served.provider, model: served.model, modelRequested,
-          taskType, classifiedBy,
+          taskType, classifiedBy, difficulty, confidence,
           promptTokens, completionTokens, totalTokens,
           latencyMs: Date.now() - start, status: "success", routingDecision, cacheHit: false,
           knownPricing: served.knownPricing,
@@ -607,7 +607,7 @@ async function handleOpenAICompat(req, res) {
       logger.write({
         requestId, timestamp, ...meta,
         provider: result.providerId, model: result.modelId, modelRequested,
-        taskType, classifiedBy,
+        taskType, classifiedBy, difficulty, confidence,
         promptTokens, completionTokens, totalTokens,
         latencyMs: Date.now() - start, status: "success", routingDecision, cacheHit: false,
         knownPricing: served.knownPricing,
@@ -666,7 +666,7 @@ async function handleOpenAICompat(req, res) {
     logger.write({
       requestId, timestamp, ...meta,
       provider: result.providerId, model: result.modelId, modelRequested,
-      taskType, classifiedBy,
+      taskType, classifiedBy, difficulty, confidence,
       promptTokens:     result.usage?.inputTokens  || 0,
       completionTokens: result.usage?.outputTokens || 0,
       totalTokens:      result.usage?.totalTokens  || 0,
