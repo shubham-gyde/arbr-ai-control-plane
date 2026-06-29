@@ -10,6 +10,53 @@ const CLASSIFY = {
   ai:       { tone: "violet", label: "AI" },
 };
 
+// One node in the request-flow strip.
+function FlowNode({ label, value, sub }) {
+  return (
+    <div className="flex shrink-0 flex-col items-center rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-center">
+      <div className="text-[10px] uppercase tracking-wide text-gray-400">{label}</div>
+      <div className="text-sm font-medium text-arbr-charcoal">{value}</div>
+      {sub && <div className="text-[10px] text-gray-400">{sub}</div>}
+    </div>
+  );
+}
+const FlowArrow = () => <span className="shrink-0 text-gray-300">→</span>;
+
+// Visualizes a single request's actual path: app → Arbr (classify → route) → model → provider,
+// built entirely from the logged record. No backend dependency.
+function RequestFlow({ r }) {
+  const classify = CLASSIFY[r.classifiedBy] || CLASSIFY.keyword;
+  const classifySub = [
+    classify.label,
+    r.difficulty ? `${r.difficulty}${r.difficultyScore ? ` ${r.difficultyScore}/10` : ""}` : null,
+    r.confidence != null ? `conf ${Number(r.confidence).toFixed(2)}` : null,
+  ].filter(Boolean).join(" · ");
+  const changed = r.modelRequested && r.modelRequested !== r.model;
+  return (
+    <div className="flex items-center gap-2 overflow-x-auto pb-1">
+      <FlowNode label="App" value={r.application || "—"} />
+      <FlowArrow />
+      <FlowNode label="Classify" value={r.taskType || "—"} sub={classifySub} />
+      <FlowArrow />
+      <div className="flex shrink-0 flex-col items-center gap-1 px-1">
+        <span className="text-[10px] uppercase tracking-wide text-gray-400">Route</span>
+        <Badge tone={ROUTING_TONE[r.routingDecision]}>{r.routingDecision}</Badge>
+      </div>
+      <FlowArrow />
+      {r.cacheHit && (<><FlowNode label="Cache" value="hit" /><FlowArrow /></>)}
+      <FlowNode
+        label="Model"
+        value={changed
+          ? <span><span className="text-gray-400 line-through">{r.modelRequested}</span> → {r.model}</span>
+          : (r.model || "—")}
+      />
+      <FlowArrow />
+      <FlowNode label="Provider" value={r.provider || "—"} />
+      {r.status !== "success" && <span className="shrink-0"><Badge tone="red">{r.status}</Badge></span>}
+    </div>
+  );
+}
+
 const EMPTY_FILTER = { application: "", workflow: "", department: "", model: "", provider: "", taskType: "" };
 
 const PERIODS = [
@@ -196,6 +243,7 @@ export default function RequestsTable({ fixedFilters = {}, hiddenFilterKeys = []
             <div className="text-sm text-red-600">{detail._error}</div>
           ) : (
             <div className="space-y-5">
+              <RequestFlow r={detail} />
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 <Stat label="Status" value={detail.status} />
                 <Stat label="Routing" value={detail.routingDecision} />
