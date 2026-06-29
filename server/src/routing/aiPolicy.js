@@ -148,6 +148,32 @@ function lookup(map, taskType) {
   return m ? { provider: m.provider, model } : null;
 }
 
+// Difficulty-aware resolution. Start from the policy's pick for the task type; if the
+// classifier rated THIS instance easier or harder than the task's default tier, re-pick
+// within that tier using the same scoring engine. Falls back to the base pick on anything
+// unexpected (no difficulty, unknown task, scoring error, or a non-live result).
+function resolveModel({ map, taskType, difficulty, eff }) {
+  const base = lookup(map, taskType);
+  // Only ADJUST an existing policy pick; never invent one for an unmapped task (that stays
+  // passthrough, as before). And no difficulty/eff → unchanged behavior.
+  if (!base || !difficulty || !eff || !eff.liveIds) return base;
+  const tt = String(taskType || "").toLowerCase();
+  const catalogTier = TASK_CATALOG.find((t) => t.id === tt)?.tier || null;
+  if (difficulty === catalogTier) return base;
+  try {
+    const liveIdSet = new Set(eff.liveIds);
+    const liveModels = pricing.listModels()
+      .filter((m) => liveIdSet.has(m.provider))
+      .sort((a, b) => (b.inputPer1M || 0) - (a.inputPer1M || 0));
+    if (!liveModels.length) return base;
+    const catalogMap = Object.fromEntries(TASK_CATALOG.map((t) => [t.id, t]));
+    const id = _scoringFallback(tt, liveModels, catalogMap, eff, difficulty);
+    const m = pricing.getModel(id);
+    if (m && liveIdSet.has(m.provider)) return { provider: m.provider, model: id };
+    return base;
+  } catch { return base; }
+}
+
 // Operator edits — keep only entries whose model is known to the pricing table.
 async function setAssignments(assignments) {
   const clean = {};
@@ -289,7 +315,7 @@ async function _computeAssignments({ router, eff, excludeModels = [] }) {
   return { assignments, generatorModel };
 }
 
-function _scoringFallback(task, liveModels, catalogMap, eff) {
+function _scoringFallback(task, liveModels, catalogMap, eff, tierOverride) {
   const byTier = { light: [], mid: [], premium: [] };
   for (const m of liveModels) { if (byTier[m.tier]) byTier[m.tier].push(m); }
   const hardFallback = liveModels[0].id;
@@ -302,7 +328,7 @@ function _scoringFallback(task, liveModels, catalogMap, eff) {
     return p.length ? p : liveModels;
   }
 
-  const tier     = catalogMap[task]?.tier || "mid";
+  const tier     = tierOverride || catalogMap[task]?.tier || "mid";
   const taskCaps = TASK_CAPABILITIES[task] || { coding:0.3, reasoning:0.3, writing:0.3, analysis:0.3, language:0.1, general:0.5, data:0.2 };
   const pool     = poolFor(tier);
   const cheapest = Math.min(...pool.map((m) => m.inputPer1M || 0.001));
@@ -350,4 +376,4 @@ async function describe() {
   };
 }
 
-module.exports = { getEffective, lookup, setAssignments, regenerate, computeAssignments: _computeAssignments, describe, invalidate, CAPABILITY_VERSION };
+module.exports = { getEffective, lookup, resolveModel, setAssignments, regenerate, computeAssignments: _computeAssignments, describe, invalidate, CAPABILITY_VERSION };

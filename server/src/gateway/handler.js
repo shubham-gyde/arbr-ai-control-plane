@@ -106,6 +106,8 @@ async function resolveRoute(body, { router, eff, application, workflow, appConfi
   });
   const taskType = cls.taskType;
   const classifiedBy = cls.method;
+  const difficulty = cls.difficulty || null;
+  const confidence = typeof cls.confidence === "number" ? cls.confidence : null;
 
   let served, routingDecision;
   if (explicit) {
@@ -129,7 +131,10 @@ async function resolveRoute(body, { router, eff, application, workflow, appConfi
       const aiMap = appDbConfig?.aiPolicyAssignments
         ? appDbConfig.aiPolicyAssignments
         : await aiPolicy.getEffective();
-      const hit = aiPolicy.lookup(aiMap, taskType);
+      // A low-confidence classification shouldn't drive a difficulty-based downgrade;
+      // fall back to the task's default policy pick when we're unsure.
+      const effDifficulty = (confidence == null || confidence >= 0.5) ? difficulty : null;
+      const hit = aiPolicy.resolveModel({ map: aiMap, taskType, difficulty: effDifficulty, eff });
       if (hit && eff.liveIds.includes(hit.provider)) {
         served = { provider: hit.provider, model: hit.model };
         routingDecision = "ai";
@@ -169,7 +174,7 @@ async function resolveRoute(body, { router, eff, application, workflow, appConfi
     }
   }
 
-  return { served, routingDecision, taskType, classifiedBy, cls };
+  return { served, routingDecision, taskType, classifiedBy, cls, difficulty, confidence };
 }
 
 async function handleChat(req, res) {
@@ -235,9 +240,9 @@ async function handleChat(req, res) {
     allowedModels: req.apiKey?.allowedModels || [],
     defaultModel: req.apiKey?.defaultModel || null,
   };
-  let served, routingDecision, taskType, classifiedBy, cls;
+  let served, routingDecision, taskType, classifiedBy, cls, difficulty, confidence;
   try {
-    ({ served, routingDecision, taskType, classifiedBy, cls } =
+    ({ served, routingDecision, taskType, classifiedBy, cls, difficulty, confidence } =
       await resolveRoute(body, { router, eff, application: meta.application, workflow: meta.workflow, appConfig, appDbConfig: appCfg }));
   } catch (err) {
     if (err.code === "model_not_allowed") {
@@ -315,7 +320,7 @@ async function handleChat(req, res) {
         logger.write({
           requestId, timestamp, ...meta,
           provider: cached.provider, model: cached.model, modelRequested,
-          taskType, classifiedBy,
+          taskType, classifiedBy, difficulty, confidence,
           promptTokens: cached.usage?.inputTokens || 0,
           completionTokens: cached.usage?.outputTokens || 0,
           totalTokens: cached.usage?.totalTokens || 0,
@@ -383,7 +388,7 @@ async function handleChat(req, res) {
     logger.write({
       requestId, timestamp, ...meta,
       provider: result.providerId, model: result.modelId, modelRequested,
-      taskType, classifiedBy,
+      taskType, classifiedBy, difficulty, confidence,
       promptTokens: result.usage?.inputTokens || 0,
       completionTokens: result.usage?.outputTokens || 0,
       totalTokens: result.usage?.totalTokens || 0,

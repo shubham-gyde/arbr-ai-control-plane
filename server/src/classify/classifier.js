@@ -89,10 +89,7 @@ const RULES = [
   ["content generation",            ["write a", "draft", "generate a", "compose", "create a post", "blog", "marketing"]],
 ];
 
-function firstUserText(messages) {
-  if (!Array.isArray(messages)) return "";
-  const valid = messages.filter((x) => x != null);
-  const m = valid.find((x) => (x.role || "user").toLowerCase() === "user") || valid[0];
+function messageText(m) {
   if (!m) return "";
   if (typeof m.content === "string") return m.content;
   if (Array.isArray(m.content)) {
@@ -101,28 +98,102 @@ function firstUserText(messages) {
   return String(m.content || "");
 }
 
+function firstUserText(messages) {
+  if (!Array.isArray(messages)) return "";
+  const valid = messages.filter((x) => x != null);
+  const m = valid.find((x) => (x.role || "user").toLowerCase() === "user") || valid[0];
+  return messageText(m);
+}
+
+// The LATEST user turn — what the model is actually being asked right now. Routing must
+// classify this, not the first turn of a long conversation (which is stale by turn 2).
+function lastUserText(messages) {
+  if (!Array.isArray(messages)) return "";
+  const valid = messages.filter((x) => x != null);
+  for (let i = valid.length - 1; i >= 0; i--) {
+    if ((valid[i].role || "user").toLowerCase() === "user") return messageText(valid[i]);
+  }
+  return messageText(valid[valid.length - 1]);
+}
+
+// ── Difficulty signal ───────────────────────────────────────────────────────
+// Each task type has a default tier; an individual request can be easier or harder than
+// that. difficulty lets the router right-size the model (cheap for trivial, strong for hard)
+// instead of routing every instance of a task type to the same model.
+const _TIER_BY_TASK = Object.fromEntries(TASK_CATALOG.map((t) => [t.id, t.tier]));
+function tierForTask(taskType) { return _TIER_BY_TASK[String(taskType || "").toLowerCase()] || null; }
+
+const TIER_ORDER = ["light", "mid", "premium"];
+function normalizeDifficulty(v) {
+  const s = String(v || "").toLowerCase().trim();
+  if (["light", "easy", "low", "simple", "trivial"].includes(s)) return "light";
+  if (["mid", "medium", "moderate", "normal"].includes(s)) return "mid";
+  if (["premium", "hard", "high", "complex", "difficult"].includes(s)) return "premium";
+  return null;
+}
+function clamp01(n) { return Math.max(0, Math.min(1, Number(n))); }
+
+// Cheap heuristic difficulty for the keyword path (no LLM estimate available). Starts at the
+// task's catalog tier and nudges one step by surface signals.
+const HARD_CUES = /\b(step by step|step-by-step|and then|after that|multiple steps|several steps|design|architect|optimi[sz]e|trade-?offs?|edge cases?|end[- ]to[- ]end|across (?:multiple|several)|refactor|migrat|root cause)\b/i;
+function estimateDifficulty(text, taskType) {
+  const t = text || "";
+  let idx = TIER_ORDER.indexOf(tierForTask(taskType) || "mid");
+  if (idx < 0) idx = 1;
+  const codeBlocks = (t.match(/```/g) || []).length;
+  if (t.length < 80 && !HARD_CUES.test(t)) idx = Math.max(0, idx - 1);
+  if (HARD_CUES.test(t) || t.length > 1500 || codeBlocks >= 2) idx = Math.min(2, idx + 1);
+  return TIER_ORDER[idx];
+}
+
+// Last complete {...} JSON block in text. Local copy (a require on aiPolicy would be circular,
+// since aiPolicy imports this module for TASK_TYPES/TASK_CATALOG).
+function parseJsonBlock(text) {
+  let depth = 0, end = -1;
+  for (let i = (text || "").length - 1; i >= 0; i--) {
+    const ch = text[i];
+    if (ch === "}") { if (depth === 0) end = i; depth++; }
+    else if (ch === "{") {
+      depth--;
+      if (depth === 0 && end !== -1) {
+        try { return JSON.parse(text.slice(i, end + 1)); } catch { end = -1; depth = 0; }
+      }
+    }
+  }
+  return null;
+}
+
+// Pick a cheap, fast model for classification instead of the (possibly premium) default.
+function pickClassifierModel(eff) {
+  const pricing = require("../pricing/registry");
+  const light = eff.defaultModel ? pricing.suggestLightTarget(eff.defaultModel) : null;
+  if (light && (eff.liveIds || []).includes(light.provider)) return light;
+  return { provider: eff.defaultProvider, model: eff.defaultModel };
+}
+
 // Returns { taskType, source: "manual" | "auto", confidence }.
 // confidence: manual = 1.0, a keyword hit = 0.9, the safe-default fallthrough = 0.3.
 function classify({ taskType, messages }) {
   if (taskType && String(taskType).trim()) {
-    return { taskType: String(taskType).trim().toLowerCase(), source: "manual", confidence: 1.0 };
+    return { taskType: String(taskType).trim().toLowerCase(), source: "manual", confidence: 1.0, difficulty: null };
   }
-  const text = firstUserText(messages).toLowerCase();
+  const text = lastUserText(messages).toLowerCase();
   for (const [type, keywords] of RULES) {
     if (keywords.some((kw) => text.includes(kw))) {
-      return { taskType: type, source: "auto", confidence: 0.9 };
+      return { taskType: type, source: "auto", confidence: 0.9, difficulty: estimateDifficulty(text, type) };
     }
   }
-  return { taskType: "content generation", source: "auto", confidence: 0.3 }; // safe default
+  // safe default
+  return { taskType: "content generation", source: "auto", confidence: 0.3, difficulty: estimateDifficulty(text, "content generation") };
 }
 
 // ── LLM fallback ──────────────────────────────────────────────────────────────
 
 // Tiny in-memory cache so identical inputs aren't re-classified (bounds cost).
 const LLM_CACHE_MAX = 2000;
-const _llmCache = new Map(); // sha(firstUserText) -> taskType
+const _llmCache = new Map(); // sha(lastUserText) -> { taskType, difficulty, confidence }
 function cacheKey(messages) {
-  return crypto.createHash("sha256").update(firstUserText(messages)).digest("hex");
+  return crypto.createHash("sha256").update(lastUserText(messages)).digest("hex");
 }
 
 function normalizeLabel(text) {
@@ -134,27 +205,37 @@ function normalizeLabel(text) {
   return null;
 }
 
-// One LLM call on the DEFAULT model → a task type from TASK_TYPES, or null.
+// One LLM call on a CHEAP model → { taskType, difficulty, confidence } from TASK_TYPES, or null.
 async function classifyWithLLM({ messages, router, eff }) {
   if (!router || !eff || !eff.defaultProvider) return null;
-  const text = firstUserText(messages).slice(0, 800);
+  const text = lastUserText(messages).slice(0, 800);
   const prompt =
-    `You are a task classifier. Classify the user request into EXACTLY ONE of these task types:\n` +
-    `${TASK_TYPES.join(", ")}\n` +
-    `Respond with only the task type, nothing else.\n\nRequest:\n"""${text}"""`;
+    `You are a task classifier for an AI gateway. Classify the user request and rate its difficulty.\n` +
+    `taskType MUST be EXACTLY ONE of: ${TASK_TYPES.join(", ")}\n` +
+    `difficulty: "light" = trivial/short, "mid" = moderate, "premium" = complex, multi-step, or deep reasoning.\n` +
+    `Return ONLY a JSON object: {"taskType": "...", "difficulty": "light|mid|premium", "confidence": 0-1}\n\n` +
+    `Request:\n"""${text}"""`;
+  const m = pickClassifierModel(eff);
   const result = await router.complete({
     messages: [{ role: "user", content: prompt }],
-    providerOverride: eff.defaultProvider,
-    modelOverride: eff.defaultModel,
+    providerOverride: m.provider,
+    modelOverride: m.model,
     temperature: 0,
     maxTokens: 256, // headroom for "thinking" models (e.g. Gemini 2.5)
   });
-  const label = normalizeLabel(result.text);
+  const parsed = parseJsonBlock(result.text || "");
+  let label = parsed ? normalizeLabel(parsed.taskType) : null;
+  const difficulty = parsed ? normalizeDifficulty(parsed.difficulty) : null;
+  const confidence = parsed && parsed.confidence != null && !isNaN(Number(parsed.confidence))
+    ? clamp01(parsed.confidence) : null;
+  if (!label) label = normalizeLabel(result.text); // fallback: substring scan of raw text
   if (!label) return null;
   return {
     label,
-    provider: result.providerId || eff.defaultProvider,
-    model: result.modelId || eff.defaultModel,
+    difficulty,
+    confidence,
+    provider: result.providerId || m.provider,
+    model: result.modelId || m.model,
     usage: result.usage,
     latencyMs: result.latencyMs,
   };
@@ -168,21 +249,23 @@ async function classifyWithLLM({ messages, router, eff }) {
 // is off, the keyword heuristic decides.
 async function classifyTask({ taskType, messages, router, eff, useLLM }) {
   if (taskType && String(taskType).trim()) {
-    return { taskType: String(taskType).trim().toLowerCase(), method: "provided", confidence: 1.0, llm: null };
+    return { taskType: String(taskType).trim().toLowerCase(), method: "provided", confidence: 1.0, difficulty: null, llm: null };
   }
   if (useLLM && router && eff && (eff.liveIds || []).length) {
     const key = cacheKey(messages);
     const hit = _llmCache.get(key);
-    if (hit) return { taskType: hit, method: "ai", confidence: 0.8, llm: null };
+    if (hit) return { taskType: hit.taskType, method: "ai", confidence: hit.confidence ?? 0.8, difficulty: hit.difficulty || null, llm: null };
     try {
       const r = await classifyWithLLM({ messages, router, eff });
       if (r && r.label) {
+        const entry = { taskType: r.label, difficulty: r.difficulty || null, confidence: r.confidence };
         if (_llmCache.size >= LLM_CACHE_MAX) _llmCache.delete(_llmCache.keys().next().value);
-        _llmCache.set(key, r.label);
+        _llmCache.set(key, entry);
         return {
           taskType: r.label,
           method: "ai",
-          confidence: 0.8,
+          confidence: r.confidence ?? 0.8,
+          difficulty: r.difficulty || null,
           llm: { provider: r.provider, model: r.model, usage: r.usage, latencyMs: r.latencyMs },
         };
       }
@@ -191,7 +274,10 @@ async function classifyTask({ taskType, messages, router, eff, useLLM }) {
     }
   }
   const kw = classify({ taskType: null, messages });
-  return { taskType: kw.taskType, method: "keyword", confidence: kw.confidence, llm: null };
+  return { taskType: kw.taskType, method: "keyword", confidence: kw.confidence, difficulty: kw.difficulty || null, llm: null };
 }
 
-module.exports = { classify, classifyTask, classifyWithLLM, TASK_TYPES, TASK_CATALOG };
+module.exports = {
+  classify, classifyTask, classifyWithLLM, TASK_TYPES, TASK_CATALOG,
+  firstUserText, lastUserText, estimateDifficulty, normalizeDifficulty, tierForTask,
+};

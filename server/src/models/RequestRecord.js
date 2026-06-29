@@ -45,6 +45,10 @@ const requestRecordSchema = new mongoose.Schema(
     },
     // How the taskType was determined: app-provided, keyword heuristic, or AI classifier.
     classifiedBy: { type: String, enum: ["provided", "keyword", "ai"], default: "keyword", index: true },
+    // Estimated difficulty of this instance (drives difficulty-aware model selection) and the
+    // classifier's confidence (0-1) in the taskType. Null when not estimated (e.g. provided taskType).
+    difficulty: { type: String, enum: ["light", "mid", "premium", null], default: null },
+    confidence: { type: Number, default: null },
     cacheHit: { type: Boolean, default: false },
   },
   { collection: "request_records" }
