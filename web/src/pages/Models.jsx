@@ -49,6 +49,7 @@ const PROVIDER_LABELS = {
   "hyperbolic":   "Hyperbolic",
   "minimax":      "MiniMax",
   "volcengine":   "Volcengine",
+  "nvidia-nim":   "NVIDIA NIM",
 };
 
 function providerLabel(id) {
@@ -950,10 +951,22 @@ function CatalogProviderDetail({ provider, models, onRefresh }) {
 
 // ── AddProviderForm ───────────────────────────────────────────────────────────
 
+// Known OpenAI-compatible providers with an official, prefillable base URL — for the quick-pick.
+const KNOWN_PROVIDER_OPTIONS = Object.keys(PROVIDER_ENDPOINT_INFO)
+  .filter((id) => PROVIDER_ENDPOINT_INFO[id]?.url)
+  .sort((a, b) => providerLabel(a).localeCompare(providerLabel(b)));
+
 function AddProviderForm({ onSaved, onClose }) {
   const [form, setForm] = useState({ id: "", label: "", baseURL: "", apiKey: "" });
   const [saving, setSaving] = useState(false);
   const [err, setErr]       = useState("");
+
+  // Pick a known provider → prefill id, display name, and base URL (key still required).
+  function pickKnown(id) {
+    if (!id) { setForm((f) => ({ id: "", label: "", baseURL: "", apiKey: f.apiKey })); return; }
+    const info = PROVIDER_ENDPOINT_INFO[id] || {};
+    setForm((f) => ({ ...f, id, label: providerLabel(id), baseURL: info.url || "" }));
+  }
 
   async function submit(e) {
     e.preventDefault();
@@ -967,10 +980,19 @@ function AddProviderForm({ onSaved, onClose }) {
   }
 
   const s = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+  const pickedInfo = PROVIDER_ENDPOINT_INFO[form.id];
 
   return (
     <form onSubmit={submit} className="mx-2 mb-2 p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
       <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Add custom provider</p>
+      <Field label="Known provider (optional)">
+        <select className={INPUT} value={KNOWN_PROVIDER_OPTIONS.includes(form.id) ? form.id : ""} onChange={(e) => pickKnown(e.target.value)}>
+          <option value="">Custom / other…</option>
+          {KNOWN_PROVIDER_OPTIONS.map((id) => <option key={id} value={id}>{providerLabel(id)}</option>)}
+        </select>
+        <span className="text-[11px] text-gray-400">Pick to prefill the base URL, or leave as Custom and enter it manually.</span>
+      </Field>
+      {pickedInfo?.hint && <p className="text-[11px] text-arbr-green-700">{pickedInfo.hint}</p>}
       <Field label="Provider ID (slug)">
         <input className={INPUT} placeholder="my-provider" value={form.id} onChange={s("id")} required />
         <span className="text-[11px] text-gray-400">Lowercase, no spaces. Used internally to match models.</span>
