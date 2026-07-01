@@ -12,7 +12,8 @@ const s = summarize(rows);
 const pct = (n) => (n == null ? "  —  " : `${n.toFixed(1)}%`);
 const usd = (n) => `$${(Number(n) || 0).toFixed(4)}`;
 
-console.log(`\nLiveBench router comparison  (${rows.length} rows)\n`);
+const benchName = (rows[0] && rows[0].benchmark) || "benchmark";
+console.log(`\n${benchName} router comparison  (${rows.length} rows)\n`);
 console.log("baseline          quality   qRetained   $/query    cost%prem   scored  err  unpriced");
 for (const k of Object.keys(s)) {
   const b = s[k];

@@ -4,6 +4,7 @@ const { summarize } = require("../../bench/lib/summarize");
 const { seededRand } = require("../../bench/lib/router");
 const livebench = require("../../bench/scorers/livebench");
 const arena = require("../../bench/scorers/arenahard");
+const swe = require("../../bench/scorers/swebench");
 
 let pass = 0, fail = 0;
 const eq = (got, exp, msg) => {
@@ -47,6 +48,17 @@ approx(s["always-premium"].costPerQuery, 0.10, "premium cost/query");
 eq(arena.winFromVerdict("better"), 1, "candidate better → win 1");
 eq(arena.winFromVerdict("equal"), 0.5, "tie → 0.5");
 eq(arena.winFromVerdict("worse"), 0, "candidate worse → 0");
+
+// 6. SWE-bench: read official report → resolved-rate + standard rows for aggregate.
+const sweReport = { total_instances: 5, resolved_ids: ["a", "b", "c"], unresolved_ids: ["d", "e"] };
+eq(swe.resolvedRate(sweReport).resolved, 3, "swe resolved count");
+approx(swe.resolvedRate(sweReport).rate, 0.6, "swe resolved rate 3/5");
+const sweRows = swe.rowsFromReport(sweReport, { baseline: "arbr-auto", totalCost: 10 });
+eq(sweRows.length, 5, "swe rows = attempted instances");
+eq(sweRows.filter((r) => r.score === 1).length, 3, "swe resolved rows scored 1");
+approx(sweRows[0].costUsd, 2, "swe cost/instance = total/5");
+// And they aggregate through the SAME summarize() → 60% quality:
+approx(summarize(sweRows)["arbr-auto"].quality, 0.6, "swe rows aggregate to 0.6 resolved-rate");
 
 console.log(`${pass}/${pass + fail} passed`);
 process.exit(fail ? 1 : 0);
