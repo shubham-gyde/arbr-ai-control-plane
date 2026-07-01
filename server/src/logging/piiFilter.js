@@ -18,26 +18,34 @@ const PATTERNS = [
   { name: "phone", re: /(\+?\d[\d\s\-().]{7,}\d)/g },
 ];
 
-function maskPii(text) {
+function buildPatterns(customPiiPatterns) {
+  const extra = (customPiiPatterns || []).flatMap((p) => {
+    try { return [{ name: p.name, re: new RegExp(p.pattern, "g") }]; }
+    catch { return []; }
+  });
+  return [...PATTERNS, ...extra];
+}
+
+function maskPii(text, customPiiPatterns) {
   if (!text || typeof text !== "string") return text;
   let out = text;
-  for (const { re } of PATTERNS) {
+  for (const { re } of buildPatterns(customPiiPatterns)) {
     out = out.replace(re, "[REDACTED]");
   }
   return out;
 }
 
 // Recursively mask PII in a messages array (OpenAI format).
-function maskMessages(messages) {
+function maskMessages(messages, customPiiPatterns) {
   if (!Array.isArray(messages)) return messages;
   return messages.map((m) => {
     if (!m || typeof m !== "object") return m;
-    if (typeof m.content === "string") return { ...m, content: maskPii(m.content) };
+    if (typeof m.content === "string") return { ...m, content: maskPii(m.content, customPiiPatterns) };
     if (Array.isArray(m.content)) {
       return {
         ...m,
         content: m.content.map((c) =>
-          c && c.type === "text" ? { ...c, text: maskPii(c.text) } : c
+          c && c.type === "text" ? { ...c, text: maskPii(c.text, customPiiPatterns) } : c
         ),
       };
     }

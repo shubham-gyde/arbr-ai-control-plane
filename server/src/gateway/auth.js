@@ -74,6 +74,17 @@ async function middleware(req, res, next) {
       ? header.slice(7).trim()
       : (req.headers["x-api-key"] || "").trim() || null;
 
+    // Global RPM check — enforced before per-key limits.
+    const s = await Settings.get();
+    if (s.globalRpmGuardrail) {
+      if (overRpmLimit("__global__", s.globalRpmGuardrail)) {
+        return res.status(429).json({
+          error: "rate_limit_exceeded",
+          message: `Global gateway rate limit of ${s.globalRpmGuardrail} req/min reached.`,
+        });
+      }
+    }
+
     if (raw) {
       const keys = await _keysByHash();
       const doc = keys.get(hashKey(raw));

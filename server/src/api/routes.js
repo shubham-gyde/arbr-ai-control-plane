@@ -873,16 +873,25 @@ router.get("/benchmarks/status", async (_req, res, next) => {
 // ── Governance settings (maintenance mode, max-tokens, webhook, retention, PII) ──
 const GOVERNANCE_FIELDS = ["maintenanceMode", "maxTokensGuardrail", "webhookUrl", "retentionDays", "piiMaskingEnabled"];
 
+function governanceView(s) {
+  return {
+    maintenanceMode:         s.maintenanceMode || { enabled: false, message: "" },
+    maxTokensGuardrail:      s.maxTokensGuardrail || null,
+    globalRpmGuardrail:      s.globalRpmGuardrail || null,
+    captureRequestPayloads:  s.captureRequestPayloads !== false,  // default true
+    piiMaskingEnabled:       s.piiMaskingEnabled ?? false,
+    customPiiPatterns:       s.customPiiPatterns || [],
+    requireApiKey:           s.requireApiKey ?? false,
+    webhookUrl:              s.webhookUrl || null,
+    retentionDays:           s.retentionDays ?? 90,
+    alertErrorRateEnabled:   s.alertErrorRateEnabled ?? false,
+    alertErrorRateThreshold: s.alertErrorRateThreshold ?? 5,
+  };
+}
+
 router.get("/governance", async (_req, res, next) => {
   try {
-    const s = await Settings.get();
-    res.json({
-      maintenanceMode: s.maintenanceMode || { enabled: false, message: "" },
-      maxTokensGuardrail: s.maxTokensGuardrail || null,
-      webhookUrl: s.webhookUrl || null,
-      retentionDays: s.retentionDays ?? 90,
-      piiMaskingEnabled: s.piiMaskingEnabled ?? false,
-    });
+    res.json(governanceView(await Settings.get()));
   } catch (e) { next(e); }
 });
 
@@ -896,23 +905,31 @@ router.patch("/governance", async (req, res, next) => {
         update["maintenanceMode.message"] = body.maintenanceMode.message.trim() || "Service temporarily unavailable.";
       }
     }
-    if ("maxTokensGuardrail" in body) {
+    if ("maxTokensGuardrail" in body)
       update.maxTokensGuardrail = body.maxTokensGuardrail ? Math.max(1, Number(body.maxTokensGuardrail)) : null;
-    }
-    if ("webhookUrl" in body) update.webhookUrl = body.webhookUrl ? String(body.webhookUrl).trim() : null;
-    if ("retentionDays" in body) update.retentionDays = Math.max(0, Number(body.retentionDays) || 0) || null;
-    if ("piiMaskingEnabled" in body) update.piiMaskingEnabled = !!body.piiMaskingEnabled;
+    if ("globalRpmGuardrail" in body)
+      update.globalRpmGuardrail = body.globalRpmGuardrail ? Math.max(1, Number(body.globalRpmGuardrail)) : null;
+    if ("captureRequestPayloads" in body)
+      update.captureRequestPayloads = !!body.captureRequestPayloads;
+    if ("piiMaskingEnabled" in body)
+      update.piiMaskingEnabled = !!body.piiMaskingEnabled;
+    if ("customPiiPatterns" in body && Array.isArray(body.customPiiPatterns))
+      update.customPiiPatterns = body.customPiiPatterns.filter(p => p.name && p.pattern);
+    if ("requireApiKey" in body)
+      update.requireApiKey = !!body.requireApiKey;
+    if ("webhookUrl" in body)
+      update.webhookUrl = body.webhookUrl ? String(body.webhookUrl).trim() : null;
+    if ("retentionDays" in body)
+      update.retentionDays = Math.max(0, Number(body.retentionDays) || 0) || null;
+    if ("alertErrorRateEnabled" in body)
+      update.alertErrorRateEnabled = !!body.alertErrorRateEnabled;
+    if ("alertErrorRateThreshold" in body)
+      update.alertErrorRateThreshold = Math.min(100, Math.max(0, Number(body.alertErrorRateThreshold) || 5));
 
     await Settings.updateOne({ key: "global" }, { $set: update }, { upsert: true });
     const s = await Settings.get();
     setImmediate(() => logAction("governance.update", "settings", "global", body));
-    res.json({
-      maintenanceMode: s.maintenanceMode || { enabled: false, message: "" },
-      maxTokensGuardrail: s.maxTokensGuardrail || null,
-      webhookUrl: s.webhookUrl || null,
-      retentionDays: s.retentionDays ?? 90,
-      piiMaskingEnabled: s.piiMaskingEnabled ?? false,
-    });
+    res.json(governanceView(s));
   } catch (e) { next(e); }
 });
 
@@ -926,6 +943,34 @@ router.get("/audit", async (req, res, next) => {
       AuditLog.countDocuments(),
     ]);
     res.json({ items, total, page, limit });
+  } catch (e) { next(e); }
+});
+
+// Audit CSV export — no pagination, same optional filters as /audit.
+router.get("/audit/export", async (req, res, next) => {
+  try {
+    const { action, entity, from, to } = req.query;
+    const match = {};
+    if (action) match.action = action;
+    if (entity) match.entity = entity;
+    if (from || to) {
+      match.timestamp = {};
+      if (from) match.timestamp.$gte = new Date(from);
+      if (to)   match.timestamp.$lte = new Date(to);
+    }
+    const rows = await AuditLog.find(match).sort({ timestamp: -1 }).limit(10000).lean();
+    const header = "timestamp,action,entity,entityId,actor,changes\n";
+    const csv = rows.map((r) => [
+      new Date(r.timestamp).toISOString(),
+      r.action || "",
+      r.entity || "",
+      r.entityId || "",
+      r.actor || "admin",
+      JSON.stringify(r.changes || {}).replace(/"/g, '""'),
+    ].map((v) => `"${v}"`).join(",")).join("\n");
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", 'attachment; filename="audit-log.csv"');
+    res.send(header + csv);
   } catch (e) { next(e); }
 });
 

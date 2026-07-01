@@ -47,6 +47,7 @@ export const api = {
   overview: (filter) => req(`/analytics/overview${qs(filter)}`),
   timeseries: (filter) => req(`/analytics/timeseries${qs(filter)}`),
   latencyPercentiles: (filter) => req(`/analytics/latency-percentiles${qs(filter)}`),
+  providerHealth: () => req("/analytics/provider-health"),
   by: (dimension, filter) => req(`/analytics/by/${dimension}${qs(filter)}`),
   realisedSavings: (filter) => req(`/analytics/realised-savings${qs(filter)}`),
   facets: () => req("/analytics/facets"),
@@ -133,8 +134,15 @@ export const api = {
   updateGovernance: (body) => req("/governance", { method: "PATCH", body: JSON.stringify(body) }),
 
   auditLog: (params) => req(`/audit${qs(params)}`),
-
-  providerHealth: () => req("/analytics/provider-health"),
+  exportAuditLog: (filter) => {
+    const url = `/api/audit/export${qs(filter)}`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "audit-log.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  },
 
   appConfigs: () => req("/app-configs"),
   appConfig: (app) => req(`/app-configs/${encodeURIComponent(app)}`),
