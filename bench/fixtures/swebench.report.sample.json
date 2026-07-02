@@ -1,0 +1,5 @@
+{
+  "total_instances": 5,
+  "resolved_ids": ["django__django-11001", "astropy__astropy-12907", "sympy__sympy-13480"],
+  "unresolved_ids": ["flask__flask-4045", "requests__requests-2317"]
+}
