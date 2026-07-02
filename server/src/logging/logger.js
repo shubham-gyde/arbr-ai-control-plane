@@ -30,16 +30,19 @@ async function write(record) {
       cacheSavingUsd = Math.max(0, full.totalCost - totalCost);
     }
 
-    // Captured context (prompt + response): PII-mask when enabled, then size-cap. Only the
-    // logged copy is masked — the model already received the original text. Setting is read
-    // lazily (cached by Settings.get's singleton pattern).
+    // Captured context (prompt + response): respect captureRequestPayloads toggle, then
+    // PII-mask when enabled, then size-cap. Only the logged copy is masked — the model
+    // already received the original text. Settings are read lazily (singleton pattern).
+    const s = await Settings.get().catch(() => null);
     let messages = record.messages;
     let responseText = typeof record.responseText === "string" ? record.responseText : null;
-    if (messages || responseText) {
-      const s = await Settings.get().catch(() => null);
+    if (s?.captureRequestPayloads === false) {
+      messages = undefined;
+      responseText = null;
+    } else if (messages || responseText) {
       if (s?.piiMaskingEnabled) {
-        if (messages) messages = maskMessages(messages);
-        if (responseText) responseText = maskPii(responseText);
+        if (messages) messages = maskMessages(messages, s.customPiiPatterns);
+        if (responseText) responseText = maskPii(responseText, s.customPiiPatterns);
       }
     }
     if (responseText) responseText = clampText(responseText);

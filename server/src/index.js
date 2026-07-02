@@ -10,6 +10,7 @@ const { TASK_CATALOG } = require("./classify/classifier");
 const { handleChat } = require("./gateway/handler");
 const { handleOpenAICompat } = require("./gateway/openaiCompat");
 const { purgeOldRecords } = require("./maintenance/purge");
+const errorAlertMonitor = require("./routing/errorAlertMonitor");
 const { supportsTools } = require("./gateway/capabilities");
 const auth = require("./gateway/auth");
 const adminAuth = require("./api/adminAuth");
@@ -120,6 +121,10 @@ async function start() {
   // Runs immediately on startup (catches any overdue records), then every 24h.
   purgeOldRecords();
   setInterval(purgeOldRecords, 24 * 60 * 60 * 1000);
+
+  // Error-rate alerting: checks rolling 1-hour error rate every 5 min and fires
+  // the governance webhook when the threshold is exceeded.
+  errorAlertMonitor.start();
 
   app.listen(config.port, config.host, () => {
     console.log("\n" + describe() + "\n");
